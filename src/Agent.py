@@ -77,17 +77,19 @@ class Agent:
                     for stream_name, stream_data in response:
                         for message_id, message_data in stream_data:
                             decoded_dict = {key.decode(): value.decode() for key, value in message_data.items()}
-                            json_string = json.dumps(decoded_dict)
-                            log.p_ok(f"{log.p_bold(self.id)} Received message: {json_string}")
-                            # write to file using aiofiles
-                            async with aiofiles.open(f"output/{self.id}.json", mode='a') as f:
-                                # if file is empty, write the first line as [
-                                if os.stat(f"output/{self.id}.json").st_size == 0:
-                                    await f.write("[\n")
-                                file_control(f"output/{self.id}.json",self.file_opened)
-                                self.file_opened = True
-                                await f.write(json_string+",\n")
-                            #await self.r.xack(stream_name, self.group_name, message_id)
+                            # check if incoming data belongs to slave by 4th column
+                            if decoded_dict['4'] == self.id[-1]:
+                                json_string = json.dumps(decoded_dict)
+                                log.p_ok(f"{log.p_bold(self.id)} Received message: {json_string}")
+                                # write to file using aiofiles
+                                async with aiofiles.open(f"output/{self.id}.json", mode='a') as f:
+                                    # if file is empty, write the first line as [
+                                    if os.stat(f"output/{self.id}.json").st_size == 0:
+                                        await f.write("[\n")
+                                    file_control(f"output/{self.id}.json",self.file_opened)
+                                    self.file_opened = True
+                                    await f.write(json_string+",\n")
+                                #await self.r.xack(stream_name, self.group_name, message_id)
             except Exception as e:
                 log.p_fail(f"{log.p_bold(self.id)} Exception: {e.with_traceback(e.__traceback__)}")
                 await asyncio.sleep(1)
