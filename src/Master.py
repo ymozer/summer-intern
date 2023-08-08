@@ -1,5 +1,9 @@
 from Agent import Agent
 from log.color import LogColor
+from utils.spinner import Spinner
+from utils.timeit import timeit, async_timeit
+from varname import varname, nameof
+
 
 import time 
 import json
@@ -11,14 +15,19 @@ import numpy as np
 from asyncio import sleep
 from sklearn.model_selection import train_test_split
 
+
+
 log=LogColor()
 
 
 class Master(Agent):
-    def __init__(self, id: str, IP: str, port:int|None, stream_name:str, group_name:str, dataset_path:str) -> None:
+    def __init__(self, id: str, IP: str, port:int|None, stream_name:str, group_name:str, dataset_path:str, delay:float) -> None:
          super().__init__(id, IP, port, stream_name, group_name)
          self.dataset_path = dataset_path
          self.slave_count=0
+         self.delay=delay
+         self.unique_data_sent=False
+         self.common_train_data_sent=False
 
     def decode_list_of_bytes(self,nested_list):
         decoded_list = [
@@ -52,17 +61,21 @@ class Master(Agent):
         for i in dictt:
             if i['consumers'] > 0:
                 counter+=1
-        
-        # bacause master has its own group
-        self.slave_count=counter
 
-    def read_csv(self, path):
-        df = pd.read_csv(path,sep=';')
-        return df
-    
-    def read_json(self, path):
-        df = pd.read_json(path)
-        return df
+        with open('temp.txt', 'a+') as f:
+            file_data = f.read()
+            print("file data: ", file_data)
+            if file_data == "true":
+                self.slave_count=counter
+                return
+            else: 
+                f.write(f"true\n")
+                self.slave_count=len(dictt)-1
+
+        log.p_ok(f"slave count: {self.slave_count}")
+        # create a file for keeping log on is this file executed before
+            
+
     
     def split(self, df, 
               number_of_slaves:int=2, 
@@ -85,34 +98,105 @@ class Master(Agent):
         x_train_unique_split = np.array_split(x_train_unique, number_of_slaves)
         y_train_unique_split = np.array_split(y_train_unique, number_of_slaves)
         log.p_ok(f"{log.p_bold(self.id)} Unique data split into {len(x_train_unique_split)} parts")
+        
         for i in range(number_of_slaves):
             ''' Add identifier column for slaves '''
-            num_rows = x_train_unique_split[i].shape[0]
-            new_column = np.full((num_rows, 1), i+1)
-            x_train_unique_split[i] = np.hstack((x_train_unique_split[i], new_column))
+            num_rows_x = x_train_unique_split[i].shape[0]
+            new_column_x = np.full((num_rows_x, 1), i+1)
+
+            num_rows_y = y_train_unique_split[i].shape[0]
+            new_column_y = np.full((num_rows_y, 1), i+1)
+
+            x_train_unique_split[i] = np.hstack((x_train_unique_split[i], new_column_x))
+            x_train_unique_split[i] = pd.DataFrame(x_train_unique_split[i])
+
+            x_train_unique_split[i].rename(columns={4: '999'}, inplace=True)
+            x_train_unique_split[i]['999'] = new_column_x
+
+            y_train_unique_split[i] = pd.DataFrame(y_train_unique_split[i])
+            y_train_unique_split[i]['999'] = new_column_y
+        
+
+        # convert columns to range values (0,1,2..)
+        y_train_common=pd.DataFrame(y_train_common)
+        x_train_common.columns = range(len(x_train_common.columns))
+        y_train_common.columns = range(len(y_train_common.columns))
+        x_train_common['999'] = 0 
+        y_train_common['999'] = 0 #LV ActivePower (kW)
+
+        y_test=pd.DataFrame(y_test)
 
         return x_train_unique_split, y_train_unique_split,\
             x_train_common, y_train_common,\
             x_text, y_test
     
-    async def send(self,dataTsend,agentid:int):
-        for index, row in dataTsend.iterrows():
-            await self.write(row.to_dict())
+    async def send(self, dataTsend:pd.DataFrame, agentid:int):
+        if agentid==0:
+            log.p_warn(f"Common dataset shape:\t\t{dataTsend.shape}")
+        else:
+            log.p_warn(f"Agent{agentid} dataset shape:\t{dataTsend.shape}")
+        print(f'Sending data...', end='', flush=True)
+
+        try:
+            for index, row in dataTsend.iterrows():
+                await self.write(row.to_dict())
+                await sleep(self.delay)
+        except Exception as e:
+            log.p_fail(f"Redis send exception: {log.p_bold(self.id)} {e}")
+        # finish sending
+
+        try:
+            if agentid==0:
+                self.common_train_data_sent=True
+                log.p_ok(f"Common data sent to all agents")
+                await self.write({'999':'END'})
+            else:
+                pass
+                #await self.write({'999':'SKIP'})
+        except Exception as e:
+            log.p_fail(f"Redis flag send exception: {log.p_bold(self.id)} {e}")
 
     async def send_all(self,splits):
         x_train_unique=splits[0]
-        df_uniques=[]
+        y_train_unique=splits[1]
+        x_train_common=splits[2]
+        y_train_common=splits[3]
+
+        df_xuniques=[]
         for i in x_train_unique:
-            df_uniques.append(pd.DataFrame(i))
-        log.p_warn(f"Number of unique datasets:\t{len(df_uniques)}")
+            df_xuniques.append(pd.DataFrame(i))
+        
+        df_yuniques=[]
+        for i in y_train_unique:
+            df_yuniques.append(pd.DataFrame(i))
+        
+        log.p_warn(f"Number of unique datasets:\t{len(df_xuniques)}")
+
         await asyncio.gather(
-            self.send(df_uniques[0],1),
-            self.send(df_uniques[1],2),
-            self.send(df_uniques[2],3)
+            self.send(df_xuniques[0],1),
+            self.send(df_xuniques[1],2),
+            self.send(df_xuniques[2],3),
+            self.send(df_xuniques[3],4),
         )
+        '''
+        await asyncio.gather(
+            self.send(df_yuniques[0],1),
+            self.send(df_yuniques[1],2),
+            self.send(df_yuniques[2],3),
+            self.send(df_yuniques[3],4),
+        )
+        '''
+        self.unique_data_sent=True
+        log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
 
+        await asyncio.gather(
+            self.send(x_train_common,0),
+            #self.send(y_train_common,0)
+        )
+        self.common_train_data_sent=True
 
-    async def main(self):
+    @async_timeit
+    async def master_main(self):
         await self.connect_to_redis()
         await self.create_consumer_group()
         await self.slave_counter()
@@ -125,7 +209,14 @@ class Master(Agent):
             common_ratio=0.5,
             random_state=42,
             shuffle=True
-            )
+        )
+        
         while True:
-            await self.send_all(splits)
-            await sleep(4)
+            with Spinner():
+                await self.send_all(splits)
+                if self.unique_data_sent:
+                    log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+
+                if self.common_train_data_sent:
+                    log.p_ok(f"{log.p_bold(self.id)} Common data sent")
+                    break

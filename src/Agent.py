@@ -16,6 +16,8 @@ import numpy as np
 
 from log.color import LogColor 
 from utils.file import file_control
+from utils.timeit import timeit
+
 
 log=LogColor()
 
@@ -29,6 +31,14 @@ class Agent:
         self.stream_name = stream_name
         self.group_name = group_name
         self.file_opened = False
+    
+    def read_csv(self, path):
+        df = pd.read_csv(path,sep=';')
+        return df
+    
+    def read_json(self, path):
+        df = pd.read_json(path)
+        return df
 
     async def connect_to_redis(self):
         try:
@@ -50,14 +60,14 @@ class Agent:
             await self.r.xadd(self.stream_name, data, "*")
             #log.p_ok(f"{log.p_bold(self.id)} Data written to stream: {data}")
         except Exception as e:
-            log.p_fail(f"Exception: {e}")
+            log.p_fail(f"Write Exception: {e}")
 
     async def create_consumer_group(self):
         try:
             await self.r.xgroup_create(self.stream_name, self.group_name, id='0', mkstream=True)
             log.p_ok(f"{log.p_bold(self.id)} Created consumer group: {self.group_name}")
         except Exception as e:
-            log.p_fail(f"Exception: {e}")
+            log.p_fail(f"Create customer group Exception: {e}")
 
     async def read(self):
         """
@@ -68,30 +78,41 @@ class Agent:
             - id : ID of the last item in the stream to consider already delivered.
             
         """
+        file_name = f"output/{self.id}.json"
+        no_data_timer = 0
         while True:
-            response = None
             try:
                 response =  await self.r.xreadgroup(self.group_name, self.stream_name, {self.stream_name: '>'}, None)
-                await asyncio.sleep(1)
                 if response:
                     for stream_name, stream_data in response:
                         for message_id, message_data in stream_data:
                             decoded_dict = {key.decode(): value.decode() for key, value in message_data.items()}
-                            # check if incoming data belongs to slave by 4th column
-                            if decoded_dict['4'] == self.id[-1]:
+                            last_col=decoded_dict['999']
+                            if last_col == 'END':
+                                break
+                            flag_val=int(float(last_col))
+                            if flag_val == int(self.id[-1]) or flag_val == 0:
+                                if flag_val == 0:
+                                    file_name = f"output/{self.id}_common.json"
                                 json_string = json.dumps(decoded_dict)
-                                log.p_ok(f"{log.p_bold(self.id)} Received message: {json_string}")
                                 # write to file using aiofiles
-                                async with aiofiles.open(f"output/{self.id}.json", mode='a') as f:
+                                async with aiofiles.open(file_name, mode='a') as f:
                                     # if file is empty, write the first line as [
-                                    if os.stat(f"output/{self.id}.json").st_size == 0:
+                                    if os.stat(file_name).st_size == 0:
                                         await f.write("[\n")
-                                    file_control(f"output/{self.id}.json",self.file_opened)
+                                    file_control(file_name,self.file_opened)
                                     self.file_opened = True
                                     await f.write(json_string+",\n")
                                 #await self.r.xack(stream_name, self.group_name, message_id)
+                else:
+                    log.p_fail(f"{log.p_bold(self.id)} No data to read")
+                    await asyncio.sleep(1)
+                    no_data_timer += 1
+                    if no_data_timer == 10:
+                        log.p_fail(f"{log.p_bold(self.id)} No data to read for 10 seconds")
+                        sys.exit(1)
             except Exception as e:
-                log.p_fail(f"{log.p_bold(self.id)} Exception: {e.with_traceback(e.__traceback__)}")
+                log.p_fail(f"{log.p_bold(self.id)} Excepption: {e.with_traceback(e.__traceback__)}")
                 await asyncio.sleep(1)
 
 

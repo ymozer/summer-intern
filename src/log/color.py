@@ -43,7 +43,6 @@ class LogColor:
 	def p_okcyan(self, text):
 		print(f"[OK]:\t{self.OKCYAN}{text}{self.ENDC}")
 
-
 	def p_bold(self, text):
 		return f"{self.BOLD}{text}{self.ENDC}"
 	

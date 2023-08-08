@@ -13,6 +13,7 @@ from Master import Master
 from Slave import Slave
 from log.color import LogColor
 from utils.file import get_last_character_from_file
+from utils.timeit import timeit
 
 log=LogColor()
 
@@ -28,7 +29,7 @@ def remove_last_comma_from_file(file_path: str):
         f.writelines(lines)
 
 if __name__ == '__main__':
-    slave_list=['agent1','agent2','agent3']#,'agent4']
+    slave_list=['agent1','agent2','agent3','agent4']
 
     parser = argparse.ArgumentParser(description='Agent')
     parser.add_argument('--id', type=str, default='agent_1', help='Agent ID')
@@ -49,22 +50,27 @@ if __name__ == '__main__':
             slave_instances.append(ins)
             counter += 1
 
-        master = Master('master', args.ip, args.port, 'stream_1', 'group_1', dataset_path='T1_short.csv')
+        master = Master('master', args.ip, args.port, 'stream_1', 'group_1', dataset_path='T1.csv', delay=0)
         
         await asyncio.gather(
-            master.main(),
-            slave_instances[0].main(),
-            slave_instances[1].main(),
-            slave_instances[2].main(),
-            #slave_instances[3].main(),
+            master.master_main(),
+            slave_instances[0].slave_main(),
+            slave_instances[1].slave_main(),
+            slave_instances[2].slave_main(),
+            slave_instances[3].slave_main(),
             )
 
 
     with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
         try:
             runner.run(main())
-        except KeyboardInterrupt:
-            log.p_fail("KeyboardInterrupt")
+        finally:
+            log.p_warn("QUITTING")
+
+            # create temp.txt file
+            with open('temp.txt', 'w+') as f:
+                f.write("\n")
+
             for i in slave_list:
                 with open(f"output/{i}.json", mode='a') as f:
                     if get_last_character_from_file(f"output/{i}.json")!=']':
