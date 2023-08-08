@@ -78,7 +78,7 @@ class Agent:
             - id : ID of the last item in the stream to consider already delivered.
             
         """
-        file_name = f"output/{self.id}.json"
+        file_name = f"output/{self.id}_xunique_train.json"
         no_data_timer = 0
         while True:
             try:
@@ -91,9 +91,12 @@ class Agent:
                             if last_col == 'END':
                                 break
                             flag_val=int(float(last_col))
-                            if flag_val == int(self.id[-1]) or flag_val == 0:
+                            if flag_val == int(self.id[-1]) or flag_val == 0 or flag_val == int(self.id[-1])*10:
                                 if flag_val == 0:
                                     file_name = f"output/{self.id}_common.json"
+                                elif flag_val == int(self.id[-1])*10:
+                                    file_name = f"output/{self.id}_yunique_train.json"
+
                                 json_string = json.dumps(decoded_dict)
                                 # write to file using aiofiles
                                 async with aiofiles.open(file_name, mode='a') as f:

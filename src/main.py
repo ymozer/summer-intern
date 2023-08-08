@@ -47,17 +47,14 @@ if __name__ == '__main__':
         counter = 2
         for slave_ins in slave_list:
             ins=Slave(slave_ins, args.ip, args.port, 'stream_1', f'group_{counter}')
-            slave_instances.append(ins)
+            slave_instances.append(ins.slave_main())
             counter += 1
 
         master = Master('master', args.ip, args.port, 'stream_1', 'group_1', dataset_path='T1.csv', delay=0)
         
         await asyncio.gather(
             master.master_main(),
-            slave_instances[0].slave_main(),
-            slave_instances[1].slave_main(),
-            slave_instances[2].slave_main(),
-            slave_instances[3].slave_main(),
+            *slave_instances
             )
 
 

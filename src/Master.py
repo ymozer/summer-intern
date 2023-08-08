@@ -105,7 +105,8 @@ class Master(Agent):
             new_column_x = np.full((num_rows_x, 1), i+1)
 
             num_rows_y = y_train_unique_split[i].shape[0]
-            new_column_y = np.full((num_rows_y, 1), i+1)
+            new_column_y = np.full((num_rows_y, 1), (i+1)*10)
+            print(new_column_y)
 
             x_train_unique_split[i] = np.hstack((x_train_unique_split[i], new_column_x))
             x_train_unique_split[i] = pd.DataFrame(x_train_unique_split[i])
@@ -133,6 +134,8 @@ class Master(Agent):
     async def send(self, dataTsend:pd.DataFrame, agentid:int):
         if agentid==0:
             log.p_warn(f"Common dataset shape:\t\t{dataTsend.shape}")
+        elif agentid%10==0:
+            log.p_warn(f"y training dataset shape:\t{dataTsend.shape}")
         else:
             log.p_warn(f"Agent{agentid} dataset shape:\t{dataTsend.shape}")
         print(f'Sending data...', end='', flush=True)
@@ -172,20 +175,21 @@ class Master(Agent):
         
         log.p_warn(f"Number of unique datasets:\t{len(df_xuniques)}")
 
-        await asyncio.gather(
-            self.send(df_xuniques[0],1),
-            self.send(df_xuniques[1],2),
-            self.send(df_xuniques[2],3),
-            self.send(df_xuniques[3],4),
-        )
-        '''
-        await asyncio.gather(
-            self.send(df_yuniques[0],1),
-            self.send(df_yuniques[1],2),
-            self.send(df_yuniques[2],3),
-            self.send(df_yuniques[3],4),
-        )
-        '''
+        tasks_x_unique = []
+        for index, data_item in enumerate(df_xuniques, start=1):
+            tasks_x_unique.append(self.send(data_item, index))
+        print(f"Sending {len(tasks_x_unique)} unique datasets")
+        await asyncio.gather(*tasks_x_unique)
+        
+
+        print(df_yuniques)
+        tasks_y_unique = []
+        for index, data_item in enumerate(df_yuniques, start=1):
+            print(index*10)
+            tasks_y_unique.append(self.send(data_item, index*10))
+        print(f"Sending {len(tasks_y_unique)} unique datasets")
+        await asyncio.gather(*tasks_y_unique)
+
         self.unique_data_sent=True
         log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
 
