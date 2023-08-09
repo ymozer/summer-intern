@@ -1,5 +1,6 @@
 from Agent import Agent
 from utils.timeit import timeit, async_timeit
+import asyncio
 
 from sklearn.metrics import mean_squared_error, mean_absolute_error,r2_score
 from sklearn.linear_model import LinearRegression
@@ -36,7 +37,8 @@ class Slave(Agent):
         else:
             raise Exception('Invalid model type')
 
-        X_train=Agent.read_json(f'output/{self.id}.json') # Is this how I suppossed call func from Agent class?
+        X_train=Agent.read_json(f'output/{self.id}_xunique_train.json')
+        y_train=Agent.read_json(f'output/{self.id}_yunique_train.json')
         self.model.fit(self.X_train, self.y_train)
 
     @async_timeit

@@ -45,7 +45,7 @@ if __name__ == '__main__':
         args = parser.parse_args()
         slave_instances = []
         counter = 2
-        for slave_ins in slave_list:
+        for slave_ins in args.slave:
             ins=Slave(slave_ins, args.ip, args.port, 'stream_1', f'group_{counter}')
             slave_instances.append(ins.slave_main())
             counter += 1
@@ -56,6 +56,14 @@ if __name__ == '__main__':
             master.master_main(),
             *slave_instances
             )
+        
+        import json
+        info = await Agent.r.execute_command('XINFO', 'GROUPS', Agent.stream_name)
+        dictt = Master.decode_list_of_bytes(info)
+        json_data = json.dumps(dictt, indent=4)
+        # pretty print
+        log.p_ok(f"data: {json_data}")
+
 
 
     with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
@@ -67,13 +75,19 @@ if __name__ == '__main__':
             # create temp.txt file
             with open('temp.txt', 'w+') as f:
                 f.write("\n")
-
+            
+            # list all files in output dir
+            output_files=os.listdir('output')
+            # add prefix output/
+            output_files=['output/'+i for i in output_files]
+            print("output files: ", output_files)
+            
             for i in slave_list:
-                with open(f"output/{i}.json", mode='a') as f:
-                    if get_last_character_from_file(f"output/{i}.json")!=']':
-                        # The last line of the JSON file must not have a comma, delete it
-                        f.seek(f.tell() - 1, os.SEEK_SET)
-                        remove_last_comma_from_file(f"output/{i}.json")
-                        # code exits, so write the last line as ]
-                        f.write("\n]")
+                for j in output_files:
+                    with open(j, mode='a') as f:
+                        if get_last_character_from_file(j)!=']':
+                            remove_last_comma_from_file(j)
+                            # code exits, so write the last line as ]
+                            f.write("\n]")
+
             sys.exit(1)

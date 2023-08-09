@@ -4,7 +4,7 @@ from utils.spinner import Spinner
 from utils.timeit import timeit, async_timeit
 from varname import varname, nameof
 
-
+import sys
 import time 
 import json
 import random
@@ -21,12 +21,12 @@ log=LogColor()
 
 
 class Master(Agent):
-    def __init__(self, id: str, IP: str, port:int|None, stream_name:str, group_name:str, dataset_path:str, delay:float) -> None:
+    def __init__(self, id: str, IP: str, port:int|None, stream_name:str, group_name:str, delay:float, dataset_path:str) -> None:
          super().__init__(id, IP, port, stream_name, group_name)
          self.dataset_path = dataset_path
          self.slave_count=0
-         self.delay=delay
          self.unique_data_sent=False
+         self.delay=delay
          self.common_train_data_sent=False
 
     def decode_list_of_bytes(self,nested_list):
@@ -89,10 +89,10 @@ class Master(Agent):
         """
         X = df.drop(columns=Y_column_name, axis=1)
         y = df[Y_column_name]
-        x_train, x_text, y_train, y_test = train_test_split(X, y, test_size=test_ratio, random_state=random_state, shuffle=shuffle)
+        x_train, x_text, y_train, y_test = train_test_split(X, y, test_size=test_ratio)#, random_state=random_state, shuffle=shuffle)
         
         # split training again for unique and common
-        x_train_unique, x_train_common, y_train_unique, y_train_common = train_test_split(x_train, y_train, test_size=common_ratio, random_state=random_state, shuffle=shuffle) 
+        x_train_unique, x_train_common, y_train_unique, y_train_common = train_test_split(x_train, y_train, test_size=common_ratio)#, random_state=random_state, shuffle=shuffle) 
         
         # split again for each number of slaves
         x_train_unique_split = np.array_split(x_train_unique, number_of_slaves)
@@ -106,7 +106,6 @@ class Master(Agent):
 
             num_rows_y = y_train_unique_split[i].shape[0]
             new_column_y = np.full((num_rows_y, 1), (i+1)*10)
-            print(new_column_y)
 
             x_train_unique_split[i] = np.hstack((x_train_unique_split[i], new_column_x))
             x_train_unique_split[i] = pd.DataFrame(x_train_unique_split[i])
@@ -123,7 +122,7 @@ class Master(Agent):
         x_train_common.columns = range(len(x_train_common.columns))
         y_train_common.columns = range(len(y_train_common.columns))
         x_train_common['999'] = 0 
-        y_train_common['999'] = 0 #LV ActivePower (kW)
+        y_train_common['999'] = 79 #LV ActivePower (kW)
 
         y_test=pd.DataFrame(y_test)
 
@@ -131,40 +130,43 @@ class Master(Agent):
             x_train_common, y_train_common,\
             x_text, y_test
     
-    async def send(self, dataTsend:pd.DataFrame, agentid:int):
+    async def send(self, dataTsend:pd.DataFrame, agentid:int, *args):
         if agentid==0:
             log.p_warn(f"Common dataset shape:\t\t{dataTsend.shape}")
+        elif agentid==-1:
+            log.p_warn(f"y common dataset shape:\t{dataTsend.shape}")
         elif agentid%10==0:
             log.p_warn(f"y training dataset shape:\t{dataTsend.shape}")
         else:
             log.p_warn(f"Agent{agentid} dataset shape:\t{dataTsend.shape}")
-        print(f'Sending data...', end='', flush=True)
 
         try:
+            counter=0
             for index, row in dataTsend.iterrows():
                 await self.write(row.to_dict())
-                await sleep(self.delay)
+                counter+=1
+                #await sleep(self.delay)
+            print(f"Sent {counter} rows")
         except Exception as e:
             log.p_fail(f"Redis send exception: {log.p_bold(self.id)} {e}")
-        # finish sending
-
-        try:
-            if agentid==0:
-                self.common_train_data_sent=True
-                log.p_ok(f"Common data sent to all agents")
-                await self.write({'999':'END'})
-            else:
-                pass
-                #await self.write({'999':'SKIP'})
-        except Exception as e:
-            log.p_fail(f"Redis flag send exception: {log.p_bold(self.id)} {e}")
+        return
 
     async def send_all(self,splits):
+        '''
+        I want to make each sending process blocking. For example:
+        First send x_train_unique
+        Second send y_train_unique and so on 
+
+        Need to figure out slowing sending process down.
+        '''
         x_train_unique=splits[0]
         y_train_unique=splits[1]
         x_train_common=splits[2]
         y_train_common=splits[3]
 
+        '''
+        creating seperate lists for each slave to send
+        '''
         df_xuniques=[]
         for i in x_train_unique:
             df_xuniques.append(pd.DataFrame(i))
@@ -172,33 +174,46 @@ class Master(Agent):
         df_yuniques=[]
         for i in y_train_unique:
             df_yuniques.append(pd.DataFrame(i))
-        
-        log.p_warn(f"Number of unique datasets:\t{len(df_xuniques)}")
 
+        df_commons=[]
+        df_commons.append(x_train_common)
+        df_commons.append(y_train_common)
+
+        '''
+        Send Unique X Data to slaves. Sending index (1,2,3...) for 
+        identifying X columns by the slaves
+        '''
         tasks_x_unique = []
         for index, data_item in enumerate(df_xuniques, start=1):
-            tasks_x_unique.append(self.send(data_item, index))
+            task = asyncio.create_task(self.send(data_item, index))
+            tasks_x_unique.append(task)
         print(f"Sending {len(tasks_x_unique)} unique datasets")
-        await asyncio.gather(*tasks_x_unique)
+        done1, pending1 = await asyncio.wait(tasks_x_unique, return_when=asyncio.ALL_COMPLETED)
+        log.p_header(f"X unique sended to all agents.\n{done1}\n{pending1}\n")
         
-
-        print(df_yuniques)
+        '''
+        Send Unique Y Data to slaves. Sending index * 10 for 
+        identifying ground truth(y) by the slaves
+        '''
         tasks_y_unique = []
         for index, data_item in enumerate(df_yuniques, start=1):
-            print(index*10)
             tasks_y_unique.append(self.send(data_item, index*10))
         print(f"Sending {len(tasks_y_unique)} unique datasets")
-        await asyncio.gather(*tasks_y_unique)
-
+        done2, pending2 = await asyncio.wait(tasks_x_unique, return_when=asyncio.ALL_COMPLETED)
+        log.p_header(f"Y unique sended to all agents.\n{done2}\n{pending2}\n")
         self.unique_data_sent=True
-        log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
 
-        await asyncio.gather(
-            self.send(x_train_common,0),
-            #self.send(y_train_common,0)
-        )
+        '''
+        Send unique X data to slaves
+        Sending 0 for identifiying common dataset by the slaves
+        '''
+        tasks_common = []
+        for index, data_item in enumerate(df_commons, start=1):
+            tasks_common.append(self.send(data_item, 0))
+        done3, pending3 = await asyncio.wait(tasks_common, return_when=asyncio.ALL_COMPLETED)
         self.common_train_data_sent=True
-
+        return
+    
     @async_timeit
     async def master_main(self):
         await self.connect_to_redis()
@@ -214,13 +229,19 @@ class Master(Agent):
             random_state=42,
             shuffle=True
         )
-        
-        while True:
-            with Spinner():
-                await self.send_all(splits)
-                if self.unique_data_sent:
-                    log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+    
+    #with Spinner():
+        try:
+            task = asyncio.create_task(self.send_all(splits))
+            await task
+            if task.done():
+                task.cancel()
+        except Exception as e:
+            log.p_fail(f"{log.p_bold(self.id)} {e}")
 
-                if self.common_train_data_sent:
-                    log.p_ok(f"{log.p_bold(self.id)} Common data sent")
-                    break
+        if self.unique_data_sent:
+            log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+
+        if self.common_train_data_sent:
+            log.p_ok(f"{log.p_bold(self.id)} Common data sent")
+        sys.exit(0)

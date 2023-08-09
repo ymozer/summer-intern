@@ -48,17 +48,16 @@ class Agent:
                 db=0
             )
             # Set the retention time
-            #max_length = 100  # Maximum number of messages to retain
-            #self.r.xtrim(self.stream_name, maxlen=max_length, approximate=True)
-
+            max_length = 20000  # Maximum number of messages to retain
+            self.r.xtrim(self.stream_name, maxlen=max_length, approximate=True)
             log.p_ok(f"{log.p_bold(self.id)} Connected to Redis at {self.r_IP}:{self.r_port}")
+            
         except ConnectionError as cerr:
             log.p_fail(f"ConnectionError: {cerr}")
 
     async def write(self, data: dict):
         try:
             await self.r.xadd(self.stream_name, data, "*")
-            #log.p_ok(f"{log.p_bold(self.id)} Data written to stream: {data}")
         except Exception as e:
             log.p_fail(f"Write Exception: {e}")
 
@@ -68,19 +67,15 @@ class Agent:
             log.p_ok(f"{log.p_bold(self.id)} Created consumer group: {self.group_name}")
         except Exception as e:
             log.p_fail(f"Create customer group Exception: {e}")
+    
+    async def info(self):
+        info = await self.r.execute_command('XINFO', 'GROUPS', self.stream_name)
+        log.p_ok(f"{log.p_bold(self.id)} Info: {info}")
+
 
     async def read(self):
-        """
-        https://redis-py.readthedocs.io/en/stable/commands.html#redis.commands.cluster.RedisClusterCommands.xgroup_create
-        args:
-            - name: name of the stream to read from
-            - groupname : name of the consumer group to read from
-            - id : ID of the last item in the stream to consider already delivered.
-            
-        """
-        file_name = f"output/{self.id}_xunique_train.json"
-        no_data_timer = 0
         while True:
+            file_name = f"output/{self.id}_xunique_train.json"
             try:
                 response =  await self.r.xreadgroup(self.group_name, self.stream_name, {self.stream_name: '>'}, None)
                 if response:
@@ -91,12 +86,13 @@ class Agent:
                             if last_col == 'END':
                                 break
                             flag_val=int(float(last_col))
-                            if flag_val == int(self.id[-1]) or flag_val == 0 or flag_val == int(self.id[-1])*10:
+                            if flag_val == int(self.id[-1]) or flag_val == 0 or flag_val == int(self.id[-1])*10 or flag_val == int(79):
                                 if flag_val == 0:
-                                    file_name = f"output/{self.id}_common.json"
+                                    file_name = f"output/{self.id}_xcommon.json"
+                                elif flag_val == int(79):
+                                    file_name = f"output/{self.id}_ycommon.json"
                                 elif flag_val == int(self.id[-1])*10:
                                     file_name = f"output/{self.id}_yunique_train.json"
-
                                 json_string = json.dumps(decoded_dict)
                                 # write to file using aiofiles
                                 async with aiofiles.open(file_name, mode='a') as f:
@@ -106,16 +102,9 @@ class Agent:
                                     file_control(file_name,self.file_opened)
                                     self.file_opened = True
                                     await f.write(json_string+",\n")
-                                #await self.r.xack(stream_name, self.group_name, message_id)
-                else:
-                    log.p_fail(f"{log.p_bold(self.id)} No data to read")
-                    await asyncio.sleep(1)
-                    no_data_timer += 1
-                    if no_data_timer == 10:
-                        log.p_fail(f"{log.p_bold(self.id)} No data to read for 10 seconds")
-                        sys.exit(1)
+                                await self.r.xack(stream_name, self.group_name, message_id)
             except Exception as e:
-                log.p_fail(f"{log.p_bold(self.id)} Excepption: {e.with_traceback(e.__traceback__)}")
+                log.p_fail(f"{log.p_bold(self.id)} Redis Read Exception: {e.with_traceback(e.__traceback__)}{e.__cause__}")
                 await asyncio.sleep(1)
 
 
