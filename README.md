@@ -1,5 +1,7 @@
 # summer-intern
 
-## Notes
-* in one round total entries read supossed to be 50530 per agent 
-for common I can use another consumer group to use on only common data.
+## TO-DO's
+- [ ] Fix slave count --> master
+- [ ] Best slave selection
+- [ ] Combine unique and common
+    - for now training only done with unique, with no common dataset input 

@@ -87,47 +87,32 @@ class Slave(Agent):
         X_train, y_train=await self.load_dataset()
 
         if os.path.exists(pickle_file) or self.model_trained:
-            log.p_fail(f"Model {self.model.__name__} already trained")
+            log.p_fail(f"Model {self.model} already trained")
             with open(pickle_file, "rb") as f:
                 self.model_train = pickle.load(f)
-            log.p_ok(f"Model {self.model.__name__} loaded from pickle file")
+            log.p_ok(f"Model {self.model} loaded from pickle file")
             await self.predict(X_train, y_train)
             return
+        
         try:
-            match str(self.model.__name__):
-                case "LinearRegression":
-                    self.model_train = LinearRegression()
-                    lr = LinearRegression()
-                    lr.fit(X_train, y_train)
-                    self.model_train = lr
-                    log.p_header(f"Training model lr {self.id}")
-                case "RandomForestRegressor":
-                    self.model_train = RandomForestRegressor()
-                    rf = RandomForestRegressor()
-                    rf.fit(X_train, y_train)
-                    self.model_train = rf
-                    log.p_header(f"Training model rf {self.id}")
-                case "DecisionTreeRegressor":
-                    self.model_train = DecisionTreeRegressor()
-                    df = DecisionTreeRegressor()
-                    df.fit(X_train, y_train)
-                    self.model_train = df
-                    log.p_header(f"Training model dt {self.id}")
-                case "AdaBoostRegressor":
-                    self.model_train = AdaBoostRegressor()
-                    ab = AdaBoostRegressor()
-                    ab.fit(X_train, y_train)
-                    self.model_train = ab
-                    log.p_header(f"Training model ada {self.id}")
+            # train model
+            self.model.fit(X_train, y_train)
             
+            # create models dir if not exists
             if not os.path.exists("models"):
                 os.mkdir("models")
+
+            # save model to pickle file
             with open(f"models/{self.id}_model.pkl", "wb") as f:
                 pickle.dump(self.model_train, f)
-            log.p_ok(f"Model {self.model.__name__} pickled")
+            log.p_ok(f"Model {self.model} pickled")
 
+            # log
             self.model_trained = True
             self.model_trained_time = time.time()
+            self.model_trained_time_str = datetime.fromtimestamp(
+                self.model_trained_time
+            ).strftime("%d/%m/%Y %H:%M:%S")
             log.p_ok(f"Model {type(self.model_train).__name__} trained at {self.model_trained_time_str}")
 
             # TODO: i can make X_train and y_train class member and use them in predict...
@@ -138,16 +123,16 @@ class Slave(Agent):
 
     async def predict(self, x_train: pd.DataFrame, y_train: pd.DataFrame):
         y_pred=self.model_train.predict(x_train)
-        log.p_ok(f"Model {self.model.__name__} predicted")
+        log.p_ok(f"Model {self.model} predicted")
         # metrics 
         mse = mean_squared_error(y_train, y_pred)
         mae = mean_absolute_error(y_train, y_pred)
         r2 = r2_score(y_train, y_pred)
-        log.p_ok(f"Model {self.model.__name__} metrics: mse: {mse}, mae: {mae}, r2: {r2}")
+        log.p_ok(f"Model {self.model} metrics: mse: {mse}, mae: {mae}, r2: {r2}")
         # write metrics to file
         with open(f"models/{self.id}_metrics.txt", "w") as f:
             f.write(f"{self.model_trained_time_str}\n")
-            f.write(f"{self.model.__name__} mse: {mse}, mae: {mae}, r2: {r2}\n")
+            f.write(f"{self.model} mse: {mse}, mae: {mae}, r2: {r2}\n")
 
 
 

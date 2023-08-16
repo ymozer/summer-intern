@@ -28,7 +28,7 @@ log=LogColor()
 
 if __name__ == "__main__":
     slave_list = ["agent1", "agent2", "agent3", "agent4"]
-    model_names=[LinearRegression, RandomForestRegressor, DecisionTreeRegressor, AdaBoostRegressor]
+    model_names=[LinearRegression(), RandomForestRegressor(), DecisionTreeRegressor(), AdaBoostRegressor()]
     parser = argparse.ArgumentParser(description="Agent")
     parser.add_argument("--id", type=str, default="agent_1", help="Agent ID")
     parser.add_argument("--ip", type=str, default="127.0.0.1", help="Redis IP")
