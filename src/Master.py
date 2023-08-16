@@ -3,6 +3,7 @@ from log.color import LogColor
 from utils.timeit import timeit, async_timeit
 from varname import varname, nameof
 
+import os
 import sys
 import time
 import json
@@ -96,8 +97,9 @@ class Master(Agent):
         X = df.drop(columns=Y_column_name, axis=1)
         y = df[Y_column_name]
         x_train, x_text, y_train, y_test = train_test_split(
-            X, y, test_size=test_ratio
-        )  # , random_state=random_state, shuffle=shuffle)
+            X, y, test_size=test_ratio,
+            random_state=random_state, shuffle=shuffle
+        )
 
         # split training again for unique and common
         (
@@ -106,8 +108,9 @@ class Master(Agent):
             y_train_unique,
             y_train_common,
         ) = train_test_split(
-            x_train, y_train, test_size=common_ratio
-        )  # , random_state=random_state, shuffle=shuffle)
+            x_train, y_train, test_size=common_ratio,
+            random_state=random_state, shuffle=shuffle
+        )
 
         # split again for each number of slaves
         x_train_unique_split = np.array_split(x_train_unique, number_of_slaves)
@@ -245,26 +248,34 @@ class Master(Agent):
         await self.create_consumer_group()
         await self.slave_counter()
         log.p_ok(f"{log.p_bold(self.id)} Slave count: {self.slave_count}")
-        splits = self.split(
-            self.read_csv(self.dataset_path),
-            number_of_slaves=self.slave_count,
-            Y_column_name="LV ActivePower (kW)",
-            test_ratio=0.2,
-            common_ratio=0.5,
-            random_state=42,
-            shuffle=True,
-        )
 
-        try:
-            task = asyncio.create_task(self.send_all(splits))
-            await task
-            if task.done():
-                task.cancel()
-        except Exception as e:
-            log.p_fail(f"{log.p_bold(self.id)} {e}")
+        if not os.path.exists('output'):
+            # create output dir
+            if not os.path.exists("output"):
+                os.makedirs("output")
 
-        if self.unique_data_sent:
-            log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+            splits = self.split(
+                self.read_csv(self.dataset_path),
+                number_of_slaves=self.slave_count,
+                Y_column_name="LV ActivePower (kW)",
+                test_ratio=0.2,
+                common_ratio=0.5,
+                random_state=42,
+                shuffle=True,
+            )
 
-        if self.common_train_data_sent:
-            log.p_ok(f"{log.p_bold(self.id)} Common data sent")
+            try:
+                task = asyncio.create_task(self.send_all(splits))
+                await task
+                if task.done():
+                    task.cancel()
+            except Exception as e:
+                log.p_fail(f"{log.p_bold(self.id)} {e}")
+
+            if self.unique_data_sent:
+                log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+
+            if self.common_train_data_sent:
+                log.p_ok(f"{log.p_bold(self.id)} Common data sent")
+        else:
+            pass
