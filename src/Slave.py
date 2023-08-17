@@ -4,29 +4,21 @@ import json
 import asyncio
 import aiofiles
 import pickle
-
-from datetime import datetime
 import pandas as pd
+import numpy as np
+from datetime import datetime
+from utils.timeit import async_timeit
 
-from typing import Protocol
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.linear_model import (
-    LinearRegression,
-    Ridge,
-    Lasso,
-    ElasticNet,
-    BayesianRidge,
-)
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import (
-    ExtraTreesRegressor,
-    AdaBoostRegressor,
-    RandomForestRegressor,
-)
-from sklearn.model_selection import train_test_split
+
+import tensorflow as tf
+from keras import datasets, layers, models
+from keras import Sequential
+from keras.layers import Dense
+import matplotlib.pyplot as plt
+
 from Agent import Agent
-from utils.timeit import timeit, async_timeit
 from log.color import LogColor
 from utils.file import file_control, get_last_character_from_file
 from utils.spinner import Spinner
@@ -45,59 +37,105 @@ class Slave(Agent):
         model_params: dict,
     ) -> None:
         super().__init__(id, IP, port, stream_name, group_name)
-        self.model = model
-        self.model_train= None
-        self.model_params = model_params
-        self.model_trained = False
-        self.model_trained_time = None
+        self.X_unique               = None
+        self.y_unique               = None
+        self.X_common               = None
+        self.y_common               = None
+        self.X_test                 = None
+        self.y_test                 = None 
+        self.X_val                  = None
+        self.y_val                  = None
+        self.X_train                = None
+        self.y_train                = None
+
+        self.model                  = model
+        self.model_train            = None
+        self.model_trained          = False
+        self.model_trained_time     = None
         self.model_trained_time_str = None
-        self.X_train = None
-        self.y_train = None
+        self.model_params           = model_params
 
-    @property
-    def reading_done(self):
-        return self._is_train_reading_done
-
-    @reading_done.setter
-    def reading_done(self, _is_train_reading_done):
-        self._is_train_reading_done = _is_train_reading_done
-        self.train()
-
-    def train_callback(self, future):
-        print(f"Model trained at {self.model_trained_time_str}")
     
     async def load_dataset(self):
         X = None
         y = None
-        with open(f"output/{self.id}_xunique_train.json", "r") as f:
-            X = json.load(f)
-        with open(f"output/{self.id}_yunique_train.json", "r") as f:
-            y = json.load(f)
+        X_test = None
+        y_test = None
+        X_common = None
+        y_common = None
+        X_val = None
+        y_val = None
 
-        X_train = pd.DataFrame(X["data"]).drop(columns=["999"])
-        format_string = "%d %m %Y %H:%M"
-        X_train["0"] = pd.to_datetime(X_train["0"], format=format_string).astype("int")
+        try:
+            with open(f"output/{self.id}_xunique_train.json", "r") as f:
+                X = json.load(f)
+            with open(f"output/{self.id}_yunique_train.json", "r") as f:
+                y = json.load(f)
+            with open(f"output/{self.id}_xtest.json", "r") as f:
+                X_test = json.load(f)
+            with open(f"output/{self.id}_ytest.json", "r") as f:
+                y_test = json.load(f)
+            with open(f"output/{self.id}_xcommon.json", "r") as f:
+                X_common = json.load(f)
+            with open(f"output/{self.id}_ycommon.json", "r") as f:
+                y_common = json.load(f)
+            with open(f"output/{self.id}_xval.json", "r") as f:
+                X_val = json.load(f)
+            with open(f"output/{self.id}_yval.json", "r") as f:
+                y_val = json.load(f)
+        except Exception as e:
+            log.p_fail(f"Read json failed: {e}")
+            log.p_fail(e.__traceback__.tb_lineno)
 
-        y_train = pd.DataFrame(y["data"]).drop(columns=["999"])
-        y_train = y_train.to_numpy().ravel()
-        return X_train, y_train
+        try:
+            format_string = "%d %m %Y %H:%M"
+            self.X_unique = pd.DataFrame(X["data"]).drop(columns=["999"])
+            self.X_unique["0"] = pd.to_datetime(self.X_unique["0"], format=format_string).astype("int")
+
+            self.X_test = pd.DataFrame(X_test["data"]).drop(columns=["999"])
+            self.X_test["0"] = pd.to_datetime(self.X_test["0"], format=format_string).astype("int")
+
+            self.y_test = pd.DataFrame(y_test["data"]).drop(columns=["999"])
+            self.y_test = self.y_test.to_numpy().ravel()
+
+            self.X_common = pd.DataFrame(X_common["data"]).drop(columns=["999"])
+            self.X_common["0"] = pd.to_datetime(self.X_common["0"], format=format_string).astype("int")
+
+            self.y_unique = pd.DataFrame(y["data"]).drop(columns=["999"])
+            self.y_common = pd.DataFrame(y_common["data"]).drop(columns=["999"])
+
+            self.X_val = pd.DataFrame(X_val["data"]).drop(columns=["999"])
+            self.X_val["0"] = pd.to_datetime(self.X_val["0"], format=format_string).astype("int")
+
+            self.y_val = pd.DataFrame(y_val["data"]).drop(columns=["999"])
+            self.y_val = self.y_val.to_numpy().ravel()
+
+            '''
+            Combine unique and common into train dataset
+            '''
+            self.X_train = pd.concat([self.X_unique, self.X_common])
+            self.y_train = pd.concat([pd.DataFrame(self.y_unique), pd.DataFrame(self.y_common)])
+            print(self.X_train.shape, self.y_train.shape)
+            self.y_train = self.y_train.to_numpy().ravel()
+        except Exception as e:
+            log.p_fail(f"Load dataset failed: {e}")
+            log.p_fail(e.__traceback__.tb_lineno)
+
 
     async def train(self):
         pickle_file = f"models/{self.id}_model.pkl"
-        X_train, y_train=await self.load_dataset()
 
         if os.path.exists(pickle_file) or self.model_trained:
             log.p_fail(f"Model {self.model} already trained")
             with open(pickle_file, "rb") as f:
                 self.model = pickle.load(f)
-                print(self.model)
             log.p_ok(f"Model {self.model} loaded from pickle file")
-            await self.predict(X_train, y_train)
+            await self.predict(self.X_train, self.y_train)
             return
         
         try:
             # train model
-            self.model.fit(X_train, y_train)
+            self.model.fit(self.X_train, self.y_train)
             
             # create models dir if not exists
             if not os.path.exists("models"):
@@ -116,19 +154,40 @@ class Slave(Agent):
             ).strftime("%d/%m/%Y %H:%M:%S")
             log.p_ok(f"Model {type(self.model).__name__} trained at {self.model_trained_time_str}")
 
-            # TODO: i can make X_train and y_train class member and use them in predict...
-            await self.predict(X_train, y_train)
+            await self.predict(self.X_train, self.y_train)
         except Exception as e:
             log.p_fail(e)
             log.p_fail(e.__traceback__.tb_lineno)
 
-    async def predict(self, x_train: pd.DataFrame, y_train: pd.DataFrame):
-        y_pred=self.model.predict(x_train)
+    async def CNN(self):
+        try:
+            # change datetime to float (int is not enough)
+            self.X_train["0"] = self.X_train["0"].to_numpy().astype(np.float32)
+            self.X_val["0"]   = self.X_val  ["0"].to_numpy().astype(np.float32)
+            self.X_test["0"]  = self.X_test ["0"].to_numpy().astype(np.float32)
+            
+            input_dim = self.X_train.shape[1]
+            model = Sequential([
+                Dense(64, activation='relu', input_shape=(input_dim,)),
+                Dense(32, activation='relu'),
+                Dense(1)  # Output layer for power prediction
+            ])
+            model.compile(loss='mean_squared_error', optimizer='adam')
+            log.p_ok(f"Model {model} compiled")
+            model.fit(self.X_train, self.y_train, epochs=50, batch_size=32, validation_data=(self.X_val, self.y_val))
+            #loss = model.evaluate(X_test, y_test)
+            model.save(f'models/{self.id}_cnn.h5')
+        except Exception as e:
+            log.p_fail(e)
+            log.p_fail(e.__traceback__.tb_lineno)
+
+    async def predict(self, X_unique: pd.DataFrame, y_unique: pd.DataFrame):
+        y_pred=self.model.predict(X_unique)
         log.p_ok(f"Model {self.model} predicted")
         # metrics 
-        mse = mean_squared_error(y_train, y_pred)
-        mae = mean_absolute_error(y_train, y_pred)
-        r2 = r2_score(y_train, y_pred)
+        mse = mean_squared_error(y_unique, y_pred)
+        mae = mean_absolute_error(y_unique, y_pred)
+        r2 = r2_score(y_unique, y_pred)
         log.p_ok(f"Model {self.model} metrics: mse: {mse}, mae: {mae}, r2: {r2}")
         # write metrics to file
         with open(f"models/{self.id}_metrics.txt", "w") as f:
@@ -161,6 +220,10 @@ class Slave(Agent):
                                 or flag_val == 0
                                 or flag_val == int(self.id[-1]) * 10
                                 or flag_val == int(79)
+                                or flag_val == -1
+                                or flag_val == -2
+                                or flag_val == -3
+                                or flag_val == -4
                             ):
                                 # TODO: if shape == Ytrain, ignore date to float conversion
                                 if flag_val == 0:
@@ -169,7 +232,17 @@ class Slave(Agent):
                                     file_name = f"output/{self.id}_ycommon.json"
                                 elif flag_val == int(self.id[-1]) * 10:
                                     file_name = f"output/{self.id}_yunique_train.json"
+                                elif flag_val == -1:
+                                    file_name = f"output/{self.id}_xtest.json"
+                                elif flag_val == -2:
+                                    file_name = f"output/{self.id}_ytest.json"
+                                elif flag_val == -3:
+                                    file_name = f"output/{self.id}_xval.json"
+                                elif flag_val == -4:
+                                    file_name = f"output/{self.id}_yval.json"
+
                                 json_string = json.dumps(decoded_dict)
+
                                 # write to file using aiofiles
                                 async with aiofiles.open(file_name, mode="a") as f:
                                     # if file is empty, write the first line as [
@@ -211,10 +284,17 @@ class Slave(Agent):
         await self.connect_to_redis()
         await self.create_consumer_group()
         await self.read()
-
+        await self.load_dataset()
+        
         task = asyncio.create_task(self.train())
         done1, pending1 = await asyncio.wait(task, return_when=asyncio.ALL_COMPLETED)
 
+        #task_cnn = asyncio.create_task(self.CNN())
+        #done2, pending2 = await asyncio.wait(task_cnn, return_when=asyncio.ALL_COMPLETED)
+
+        if self.model.__name__ == "CNN":
+            pass
+            
 
 def remove_last_comma_from_file(file_path: str):
     with open(file_path, "r") as f:

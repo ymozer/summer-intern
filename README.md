@@ -20,3 +20,7 @@ python src/main.py --slave agent1 agent2 agent3 agent4
 - [ ] Best slave selection
 - [ ] Combine unique and common
     - for now training only done with unique, with no common dataset input 
+- [ ] xgboost,lightgbm model
+- [ ] timing for each agent
+- [ ] voting for regression models
+
