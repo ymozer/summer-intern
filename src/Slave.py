@@ -46,7 +46,7 @@ class Slave(Agent):
     ) -> None:
         super().__init__(id, IP, port, stream_name, group_name)
         self.model = model
-        self.model_train= LinearRegression()
+        self.model_train= None
         self.model_params = model_params
         self.model_trained = False
         self.model_trained_time = None
@@ -89,7 +89,8 @@ class Slave(Agent):
         if os.path.exists(pickle_file) or self.model_trained:
             log.p_fail(f"Model {self.model} already trained")
             with open(pickle_file, "rb") as f:
-                self.model_train = pickle.load(f)
+                self.model = pickle.load(f)
+                print(self.model)
             log.p_ok(f"Model {self.model} loaded from pickle file")
             await self.predict(X_train, y_train)
             return
@@ -104,7 +105,7 @@ class Slave(Agent):
 
             # save model to pickle file
             with open(f"models/{self.id}_model.pkl", "wb") as f:
-                pickle.dump(self.model_train, f)
+                pickle.dump(self.model, f)
             log.p_ok(f"Model {self.model} pickled")
 
             # log
@@ -113,7 +114,7 @@ class Slave(Agent):
             self.model_trained_time_str = datetime.fromtimestamp(
                 self.model_trained_time
             ).strftime("%d/%m/%Y %H:%M:%S")
-            log.p_ok(f"Model {type(self.model_train).__name__} trained at {self.model_trained_time_str}")
+            log.p_ok(f"Model {type(self.model).__name__} trained at {self.model_trained_time_str}")
 
             # TODO: i can make X_train and y_train class member and use them in predict...
             await self.predict(X_train, y_train)
@@ -122,7 +123,7 @@ class Slave(Agent):
             log.p_fail(e.__traceback__.tb_lineno)
 
     async def predict(self, x_train: pd.DataFrame, y_train: pd.DataFrame):
-        y_pred=self.model_train.predict(x_train)
+        y_pred=self.model.predict(x_train)
         log.p_ok(f"Model {self.model} predicted")
         # metrics 
         mse = mean_squared_error(y_train, y_pred)
