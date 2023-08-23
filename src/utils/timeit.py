@@ -18,14 +18,12 @@ def timeit(f):
 def async_timeit(func, *args, **params):
     async def process(func, *args, **params):
         if asyncio.iscoroutinefunction(func):
-            print('this function is a coroutine: {}'.format(func.__name__))
             return await func(*args, **params)
         else:
             print('this is not a coroutine')
             return func(*args, **params)
 
     async def helper(*args, **params):
-        print('{}.time'.format(func.__name__))
         start = time.time()
         result = await process(func, *args, **params)
         end = time.time() - start
@@ -33,8 +31,6 @@ def async_timeit(func, *args, **params):
         # if param are passed to the function and param is 'id'
         if len(args) > 1 and 'id' in params:
             print(f'\n>>> Time took for {func.__name__} {sec} with id: {args[1]}')
-            
-        print(f'>>> Time took for {func.__name__} {sec} sec')
+        print(f'>>> Time took for {func.__name__} function {sec} sec')
         return result
-
     return helper

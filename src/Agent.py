@@ -26,6 +26,15 @@ class Agent():
     def read_json(self, path):
         df = pd.read_json(path)
         return df
+    
+    def decode_list_of_bytes(self, nested_list):
+        decoded_list = [
+            [item.decode() if isinstance(item, bytes) else item for item in sublist]
+            for sublist in nested_list
+        ]
+        # create a dictionary from even-indexed and odd-indexed pairs for each sublist
+        decoded_dict = [dict(zip(even[::2], even[1::2])) for even in decoded_list]
+        return decoded_dict
 
     async def connect_to_redis(self):
         try:
@@ -36,7 +45,6 @@ class Agent():
             log.p_ok(
                 f"{log.p_bold(self.id)} Connected to Redis at {self.r_IP}:{self.r_port}"
             )
-
         except ConnectionError as cerr:
             log.p_fail(f"ConnectionError: {cerr}")
 

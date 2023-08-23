@@ -2,6 +2,8 @@
 ## Development
 
 ``` bash
+# for lightgbm installation https://lightgbm.readthedocs.io/en/stable/Installation-Guide.html#visual-studio-or-vs-build-tools
+
 # after cloning and navigating to the directory
 python -m venv venv
 source venv/bin/activate # for linux and mac
@@ -23,4 +25,5 @@ python src/main.py --slave agent1 agent2 agent3 agent4
 - [ ] xgboost,lightgbm model
 - [ ] timing for each agent
 - [ ] voting for regression models
+- [ ] training unique and common ratio between (0,100,5) 
 

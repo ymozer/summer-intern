@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 import asyncio
@@ -22,6 +23,9 @@ from Agent import Agent
 from log.color import LogColor
 from utils.file import file_control, get_last_character_from_file
 from utils.spinner import Spinner
+
+from lightgbm import LGBMRegressor
+
 
 log = LogColor()
 
@@ -54,6 +58,12 @@ class Slave(Agent):
         self.model_trained_time     = None
         self.model_trained_time_str = None
         self.model_params           = model_params
+
+        self.metrics                = dict()
+        self.mse                    = None
+        self.mae                    = None
+        self.r2                     = None
+
 
     
     async def load_dataset(self):
@@ -115,28 +125,53 @@ class Slave(Agent):
             '''
             self.X_train = pd.concat([self.X_unique, self.X_common])
             self.y_train = pd.concat([pd.DataFrame(self.y_unique), pd.DataFrame(self.y_common)])
+            if self.X_train.shape[0] != self.y_train.shape[0]\
+            or self.X_common.shape[0] != self.y_common.shape[0]\
+            or self.X_test.shape[0] != self.y_test.shape[0]\
+            or self.X_val.shape[0] != self.y_val.shape[0]:
+                log.p_fail(f"{self.id} shape mismatch. Output folder deleting. Rerun the program.")
+                log.p_fail(f"X_train shape: {self.X_train.shape}")
+                log.p_fail(f"y_train shape: {self.y_train.shape}")
+                os.system("rm -rf output/*")
+                os.system("rm -rf models/*")
+                os.rmdir("output")
+                os.rmdir("models")
+                sys.exit(1)
             print(self.X_train.shape, self.y_train.shape)
             self.y_train = self.y_train.to_numpy().ravel()
         except Exception as e:
             log.p_fail(f"Load dataset failed: {e}")
             log.p_fail(e.__traceback__.tb_lineno)
 
-
+    @async_timeit
     async def train(self):
+        # capture time
+        start = time.time()
         pickle_file = f"models/{self.id}_model.pkl"
 
         if os.path.exists(pickle_file) or self.model_trained:
-            log.p_fail(f"Model {self.model} already trained")
+            log.p_fail(f"\nModel {self.model} already trained")
             with open(pickle_file, "rb") as f:
                 self.model = pickle.load(f)
             log.p_ok(f"Model {self.model} loaded from pickle file")
-            await self.predict(self.X_train, self.y_train)
+            await self.predict()
             return
         
         try:
-            # train model
-            self.model.fit(self.X_train, self.y_train)
-            
+            if type(self.model) == type(LGBMRegressor()):
+                self.model = LGBMRegressor(**self.model_params)
+                num_round = 10
+                self.X_train = self.X_train.to_numpy()
+                self.X_val = self.X_val.to_numpy()
+                self.model.fit(self.X_train, self.y_train, num_round, eval_set=[(self.X_val, self.y_val)])
+                self.model_trained_time = time.time() - start
+                log.p_header(f"Model {self.model} trained with time: {self.model_trained_time:.2f} sec")
+            else:
+                # train model
+                self.model.fit(self.X_train, self.y_train)
+                self.model_trained_time = time.time() - start
+                log.p_header(f"Model {self.model} trained with time: {self.model_trained_time:.2f} sec")
+
             # create models dir if not exists
             if not os.path.exists("models"):
                 os.mkdir("models")
@@ -153,8 +188,8 @@ class Slave(Agent):
                 self.model_trained_time
             ).strftime("%d/%m/%Y %H:%M:%S")
             log.p_ok(f"Model {type(self.model).__name__} trained at {self.model_trained_time_str}")
+            await self.predict()
 
-            await self.predict(self.X_train, self.y_train)
         except Exception as e:
             log.p_fail(e)
             log.p_fail(e.__traceback__.tb_lineno)
@@ -181,18 +216,29 @@ class Slave(Agent):
             log.p_fail(e)
             log.p_fail(e.__traceback__.tb_lineno)
 
-    async def predict(self, X_unique: pd.DataFrame, y_unique: pd.DataFrame):
-        y_pred=self.model.predict(X_unique)
+    async def predict(self):
+        # print value types
+        if type(self.model) == type(LGBMRegressor()):
+            # to numeric all columns
+            self.X_test = pd.DataFrame(self.X_test).apply(pd.to_numeric)
+        y_pred=self.model.predict(self.X_test)
         log.p_ok(f"Model {self.model} predicted")
         # metrics 
-        mse = mean_squared_error(y_unique, y_pred)
-        mae = mean_absolute_error(y_unique, y_pred)
-        r2 = r2_score(y_unique, y_pred)
-        log.p_ok(f"Model {self.model} metrics: mse: {mse}, mae: {mae}, r2: {r2}")
-        # write metrics to file
-        with open(f"models/{self.id}_metrics.txt", "w") as f:
-            f.write(f"{self.model_trained_time_str}\n")
-            f.write(f"{self.model} mse: {mse}, mae: {mae}, r2: {r2}\n")
+        self.mse = mean_squared_error(self.y_test, y_pred)
+        self.mae = mean_absolute_error(self.y_test, y_pred)
+        self.r2  = r2_score(self.y_test, y_pred)
+        log.p_ok(f"Model {self.model} metrics: mse: {self.mse}, mae: {self.mae}, r2: {self.r2}")
+        self.metrics = {
+            "model": f"{str(self.model)}",
+            "mse": self.mse,
+            "mae": self.mae,
+            "r2": self.r2,
+            "training_time": str(self.model_trained_time),
+            "999": -5
+        }
+        await self.write(self.metrics)
+        async with aiofiles.open(f"models/{self.id}_metrics.json", "w") as f:
+            await f.write(json.dumps(self.metrics))
 
 
 
@@ -285,15 +331,16 @@ class Slave(Agent):
         await self.create_consumer_group()
         await self.read()
         await self.load_dataset()
-        
+
         task = asyncio.create_task(self.train())
         done1, pending1 = await asyncio.wait(task, return_when=asyncio.ALL_COMPLETED)
-
+        if done1:
+            log.p_warn(f"Model {self.model} trained")
         #task_cnn = asyncio.create_task(self.CNN())
         #done2, pending2 = await asyncio.wait(task_cnn, return_when=asyncio.ALL_COMPLETED)
 
         if self.model.__name__ == "CNN":
-            pass
+            pass # TODO
             
 
 def remove_last_comma_from_file(file_path: str):

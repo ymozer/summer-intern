@@ -1,7 +1,6 @@
 from Agent import Agent
 from log.color import LogColor
 from utils.timeit import timeit, async_timeit
-from varname import varname, nameof
 
 import os
 import sys
@@ -37,24 +36,8 @@ class Master(Agent):
         self.delay = delay
         self.common_train_data_sent = False
 
-    def decode_list_of_bytes(self, nested_list):
-        decoded_list = [
-            [item.decode() if isinstance(item, bytes) else item for item in sublist]
-            for sublist in nested_list
-        ]
-        # create a dictionary from even-indexed and odd-indexed pairs for each sublist
-        decoded_dict = [dict(zip(even[::2], even[1::2])) for even in decoded_list]
-        return decoded_dict
 
     async def slave_counter(self):
-        """
-        [{'name': 'group_1',
-        'consumers': 0,
-        'pending': 0,
-        'last-delivered-id': '0-0',
-        'entries-read': None,
-        'lag': 0}]
-        """
         info = await self.r.execute_command("XINFO", "GROUPS", self.stream_name)
 
         dictt = self.decode_list_of_bytes(info)
@@ -67,16 +50,7 @@ class Master(Agent):
         for i in dictt:
             if i["consumers"] > 0:
                 counter += 1
-
-        with open("temp.txt", "a+") as f:
-            file_data = f.read()
-            print("file data: ", file_data)
-            if file_data == "true":
-                self.slave_count = counter
-                return
-            else:
-                f.write(f"true\n")
-                self.slave_count = len(dictt) - 1
+        self.slave_count = len(dictt) - 2
 
         log.p_ok(f"slave count: {self.slave_count}")
         # create a file for keeping log on is this file executed before
@@ -301,6 +275,30 @@ class Master(Agent):
         log.p_header(f"Validation data sended to all agents.\n{done5}\n{pending5}\n")
         return
 
+    async def slave_metrics_read(self):
+        log.p_warn("Starting slave metrics read")
+        info = await self.r.execute_command("XINFO", "GROUPS", self.stream_name)
+        data = self.decode_list_of_bytes(info)
+        group_names = [group['name'] for group in data]
+        log.p_warn(f"Group names: {group_names}")
+        while True:
+            for group in group_names:
+                response =  await self.r.xreadgroup(
+                    str(group), self.id, {self.stream_name: ">"}, block=0
+                )
+                if response:
+                    for stream_name, stream_data in response:
+                        for message_id, message_data in stream_data:
+                            decoded_dict = {
+                                key.decode(): value.decode()
+                                for key, value in message_data.items()
+                            }
+                            last_col  = decoded_dict["999"] 
+                            flag_val = int(float(last_col))
+                            if flag_val == -5:
+                                print("flag val: ", flag_val)
+
+
     @async_timeit
     async def master_main(self):
         await self.connect_to_redis()
@@ -308,10 +306,9 @@ class Master(Agent):
         await self.slave_counter()
         log.p_ok(f"{log.p_bold(self.id)} Slave count: {self.slave_count}")
 
+        splits = None
         if not os.path.exists('output'):
-            # create output dir
-            if not os.path.exists("output"):
-                os.makedirs("output")
+            os.makedirs("output")
 
             splits = self.split(
                 self.read_csv(self.dataset_path),
@@ -324,17 +321,14 @@ class Master(Agent):
             )
 
             try:
+                tasks=[]
                 task = asyncio.create_task(self.send_all(splits))
-                await task
+                tasks.append(task)
+                done, pending = await asyncio.wait(
+                    tasks, return_when=asyncio.ALL_COMPLETED
+                )
                 if task.done():
                     task.cancel()
+                    
             except Exception as e:
                 log.p_fail(f"{log.p_bold(self.id)} {e}")
-
-            if self.unique_data_sent:
-                log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
-
-            if self.common_train_data_sent:
-                log.p_ok(f"{log.p_bold(self.id)} Common data sent")
-        else:
-            pass
