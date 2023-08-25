@@ -60,9 +60,8 @@ class Master(Agent):
         df,
         number_of_slaves: int = 2,
         Y_column_name: str = "LV ActivePower (kW)",
-        validation_ratio: float = 0.2,
         test_ratio: float = 0.2,
-        common_ratio: float = 0.2,
+        common_ratio: float = 0.5,
         random_state: int = 42,
         shuffle: bool = True,
     ):
@@ -71,22 +70,18 @@ class Master(Agent):
         """
         X = df.drop(columns=Y_column_name, axis=1)
         y = df[Y_column_name]
-        x_train, x_test, y_train, y_test = train_test_split(
+        x_train, x_text, y_train, y_test = train_test_split(
             X, y, test_size=test_ratio,
             random_state=random_state, shuffle=shuffle
         )
 
-
-        # split training data into training and validation
-        # 0.25 x 0.8 = 0.2
-        (x_train, x_val, y_train, y_val) = train_test_split(
-            x_train, y_train, test_size=validation_ratio, 
-            random_state=random_state, shuffle=shuffle
-        ) 
-
         # split training again for unique and common
-        (x_train_unique, x_train_common,
-          y_train_unique,y_train_common) = train_test_split(
+        (
+            x_train_unique,
+            x_train_common,
+            y_train_unique,
+            y_train_common,
+        ) = train_test_split(
             x_train, y_train, test_size=common_ratio,
             random_state=random_state, shuffle=shuffle
         )
@@ -94,7 +89,6 @@ class Master(Agent):
         # split again for each number of slaves
         x_train_unique_split = np.array_split(x_train_unique, number_of_slaves)
         y_train_unique_split = np.array_split(y_train_unique, number_of_slaves)
-
         log.p_ok(
             f"{log.p_bold(self.id)} Unique data split into {len(x_train_unique_split)} parts"
         )
@@ -114,8 +108,6 @@ class Master(Agent):
             x_train_unique_split[i]["999"] = new_column_x
 
             y_train_unique_split[i] = pd.DataFrame(y_train_unique_split[i])
-            # rename first column to 0
-            y_train_unique_split[i].columns = range(len(y_train_unique_split[i].columns))
             y_train_unique_split[i]["999"] = new_column_y
 
         # convert columns to range values (0,1,2..)
@@ -126,36 +118,21 @@ class Master(Agent):
         y_train_common["999"] = 79  # LV ActivePower (kW)
 
         y_test = pd.DataFrame(y_test)
-        x_test.columns = range(len(x_test.columns))
-        y_test.columns = range(len(y_test.columns))
-        x_test["999"]=-1
-        y_test["999"]=-2
-
-        y_val = pd.DataFrame(y_val)
-        x_val.columns = range(len(x_val.columns))
-        y_val.columns = range(len(y_val.columns))
-        x_val["999"]=-3
-        y_val["999"]=-4
-
 
         return (
             x_train_unique_split,
             y_train_unique_split,
             x_train_common,
             y_train_common,
-            x_test,
+            x_text,
             y_test,
-            x_val,
-            y_val
         )
 
     async def send(self, dataTsend: pd.DataFrame, agentid: int, *args):
-        if agentid == -2:
-            log.p_warn(f"Validation dataset shape:\t{dataTsend.shape}")
-        if agentid == -1:
-            log.p_warn(f"test dataset shape:\t\t{dataTsend.shape}")
-        elif agentid == 0:
+        if agentid == 0:
             log.p_warn(f"Common dataset shape:\t\t{dataTsend.shape}")
+        elif agentid == -1:
+            log.p_warn(f"y common dataset shape:\t{dataTsend.shape}")
         elif agentid % 10 == 0:
             log.p_warn(f"y training dataset shape:\t{dataTsend.shape}")
         else:
@@ -180,10 +157,6 @@ class Master(Agent):
         y_train_unique = splits[1]
         x_train_common = splits[2]
         y_train_common = splits[3]
-        x_test         = splits[4]
-        y_test         = splits[5]
-        x_val          = splits[6]
-        y_val          = splits[7]
 
         """
         creating seperate lists for each slave to send
@@ -199,14 +172,6 @@ class Master(Agent):
         df_commons = []
         df_commons.append(x_train_common)
         df_commons.append(y_train_common)
-
-        df_tests = []
-        df_tests.append(x_test)
-        df_tests.append(y_test)
-
-        df_vals = []
-        df_vals.append(x_val)
-        df_vals.append(y_val)
 
         """
         Send Unique X Data to slaves. Sending index (1,2,3...) for 
@@ -249,30 +214,6 @@ class Master(Agent):
             tasks_common, return_when=asyncio.ALL_COMPLETED
         )
         self.common_train_data_sent = True
-
-        """
-        Send test data to slaves
-        """
-
-        tasks = []
-        for index, data_item in enumerate(df_tests):
-            task = asyncio.create_task(self.send(data_item, -1))
-            tasks.append(task)
-        done4, pending4 = await asyncio.wait(
-            tasks, return_when=asyncio.ALL_COMPLETED
-        )
-        log.p_header(f"Test data sended to all agents.\n{done4}\n{pending4}\n")
-
-        """
-        Send validation data to slaves
-        """
-        for index, data_item in enumerate(df_vals):
-            task = asyncio.create_task(self.send(data_item, -2))
-            tasks.append(task)
-        done5, pending5 = await asyncio.wait(
-            tasks, return_when=asyncio.ALL_COMPLETED
-        )
-        log.p_header(f"Validation data sended to all agents.\n{done5}\n{pending5}\n")
         return
 
     async def slave_metrics_read(self):
