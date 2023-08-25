@@ -57,7 +57,7 @@ if __name__ == "__main__":
             args.port,
             "stream_1",
             "group_1",
-            dataset_path="T1.csv",
+            dataset_path="T1_short.csv",
             delay=0,
         )
 
