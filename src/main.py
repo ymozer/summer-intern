@@ -29,7 +29,7 @@ log=LogColor()
 
 if __name__ == "__main__":
     slave_list = ["agent1", "agent2", "agent3", "agent4"]
-    model_names=[LinearRegression(), RandomForestRegressor(), DecisionTreeRegressor(), AdaBoostRegressor(), LGBMRegressor()]
+    model_names=[ LGBMRegressor(), XGBRegressor(), RandomForestRegressor(), DecisionTreeRegressor(), AdaBoostRegressor(), ExtraTreesRegressor()]
     parser = argparse.ArgumentParser(description="Agent")
     parser.add_argument("--id", type=str, default="agent_1", help="Agent ID")
     parser.add_argument("--ip", type=str, default="127.0.0.1", help="Redis IP")
@@ -41,6 +41,12 @@ if __name__ == "__main__":
         default=slave_list,
         help="Slave names separated by space",
     )
+
+    if not os.path.exists("models"):
+        os.mkdir("models")
+    open("models/master_gathered_metrics.json", "w").close()
+
+
     async def main():
         args = parser.parse_args()
         slave_instances = []
@@ -57,7 +63,7 @@ if __name__ == "__main__":
             args.port,
             "stream_1",
             "group_1",
-            dataset_path="T1_short.csv",
+            dataset_path="T1.csv",
             delay=0,
         )
 

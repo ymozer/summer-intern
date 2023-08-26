@@ -52,7 +52,10 @@ class Agent():
         try:
             await self.r.xadd(self.stream_name, data, "*")
         except Exception as e:
-            log.p_fail(f"Write Exception: {e}")
+            log.p_fail(f"Redis write Exception: {e}")
+            log.p_fail(e.__traceback__.tb_lineno)
+            log.p_fail(f"Data: {data}")
+
 
     async def create_consumer_group(self):
         try:

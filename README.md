@@ -26,4 +26,5 @@ python src/main.py --slave agent1 agent2 agent3 agent4
 - [ ] timing for each agent
 - [ ] voting for regression models
 - [ ] training unique and common ratio between (0,100,5) 
+- [ ] code doesnt exits because of slave listen loop
 

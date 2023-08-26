@@ -301,9 +301,35 @@ class Master(Agent):
         return
     
     async def read_from_slaves(self):
+        import aiofiles
         """
         Read from slaves
         """
+        while True:
+            await asyncio.sleep(1)
+            file_name = f"output/{self.id}_xunique_train.json"
+            try:
+                response = await self.r.xreadgroup(
+                    self.group_name, self.stream_name, {self.stream_name: ">"}, None
+                )
+                if response:
+                    for stream_name, stream_data in response:
+                        for message_id, message_data in stream_data:
+                            decoded_dict = {
+                                key.decode(): value.decode()
+                                for key, value in message_data.items()
+                            }
+                            if 'id' in decoded_dict:
+                                async with aiofiles.open('models/master_gathered_metrics.json', mode="a+") as f:
+                                    await f.write(json.dumps(decoded_dict) + ",\n")
+
+
+                            
+            except Exception as e:
+                log.p_fail(f"Read slaves fail: {log.p_bold(self.id)} {e}")
+                log.p_fail(e.__traceback__.tb_lineno)
+
+        """ 
         log.p_header(f"Reading from slaves")
         tasks = []
         for i in range(self.slave_count):
@@ -311,7 +337,7 @@ class Master(Agent):
             tasks.append(task)
         done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
         log.p_header(f"Read from all slaves.\n{done}\n{pending}\n")
-        return
+        return """
 
     @async_timeit
     async def master_main(self):
@@ -322,8 +348,7 @@ class Master(Agent):
 
         if not os.path.exists('output'):
             # create output dir
-            if not os.path.exists("output"):
-                os.makedirs("output")
+            os.makedirs("output")
 
             splits = self.split(
                 self.read_csv(self.dataset_path),
@@ -336,18 +361,12 @@ class Master(Agent):
             )
 
             try:
-                task = asyncio.create_task(self.send_all(splits))
-                await task
-                if task.done():
-                    task.cancel()
-            except Exception as e:
+                await self.send_all(splits)
+            except:
                 log.p_fail(f"{log.p_bold(self.id)} {e}")
-            
-            try:
-                # read from slaves
+            finally:
+                print("reading from slaves")
                 await self.read_from_slaves()
-            except Exception as e:
-                log.p_fail(f"{log.p_bold(self.id)} {e}")
 
             try:
                 await self.r.execute_command("XGROUP", "DESTROY", self.stream_name, self.group_name)
