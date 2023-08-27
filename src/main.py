@@ -44,30 +44,61 @@ if __name__ == "__main__":
 
     if not os.path.exists("models"):
         os.mkdir("models")
-    open("models/master_gathered_metrics.json", "w").close()
 
 
     async def main():
         args = parser.parse_args()
-        slave_instances = []
-        counter = 0
-        for slave_ins in args.slave:
-            ins = Slave(slave_ins, args.ip, args.port, "stream_1", f"group_{counter+2}", model_names[counter],{})
-            slave_instances.append(ins.slave_main())
-            counter += 1
-            print(slave_ins)
 
+
+        """
         master = Master(
             "master",
             args.ip,
             args.port,
             "stream_1",
             "group_1",
-            dataset_path="T1.csv",
+            dataset_path="T1_short.csv", #dataset_path="T1.csv",
             delay=0,
+            common_ratio=0.2,
+            test_ratio=0.2,
+            validation_ratio=0.2,
         )
 
         await asyncio.gather(master.master_main(), *slave_instances)
+        """
+        for i in range(10,100,10):
+            slave_instances = []
+            counter = 0
+            common_ratio = i/100
+            unique_ratio = round(1-common_ratio,1)
+            # fix floating point precision
+
+            master_id=f"m_{common_ratio}_{unique_ratio}"
+            master = Master(
+                master_id,
+                args.ip,
+                args.port,
+                "stream_1",
+                "group_1",
+                dataset_path="T1.csv",#dataset_path="T1_short.csv",
+                delay=0,
+                common_ratio=common_ratio,
+                test_ratio=0.2,
+                validation_ratio=0.1,
+            )
+            for slave_ins in args.slave:
+                ins = Slave(f"{slave_ins}_{master_id}", args.ip, args.port, "stream_1", f"group_{counter+2}", model_names[counter],{})
+                slave_instances.append(ins.slave_main())
+                counter += 1
+                
+            open(f"models/{master_id}_gathered_metrics.json", "w").close()
+            try:
+                await asyncio.gather(master.master_main(), *slave_instances)
+            except Exception as e:
+                log.p_fail(f"Exception: {e}")
+                log.p_fail(e.__traceback__.tb_lineno)
+
+
 
     with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
         try:

@@ -175,7 +175,7 @@ class Slave(Agent):
             log.p_ok(f"Model {self.model} pickled")
 
             # log
-            self.model_trained = True
+            self.model_trained = False # TODO: change this to True
             self.model_trained_time = time.time()
             self.model_trained_time_str = datetime.fromtimestamp(
                 self.model_trained_time
@@ -257,9 +257,9 @@ class Slave(Agent):
                                 break
                             flag_val = int(float(last_col))
                             if (
-                                flag_val == int(self.id[-1])
+                                flag_val == int(self.id[1])
                                 or flag_val == 0
-                                or flag_val == int(self.id[-1]) * 10
+                                or flag_val == int(self.id[1]) * 10
                                 or flag_val == int(79)
                                 or flag_val == -1
                                 or flag_val == -2
@@ -271,7 +271,7 @@ class Slave(Agent):
                                     file_name = f"output/{self.id}_xcommon.json"
                                 elif flag_val == int(79):
                                     file_name = f"output/{self.id}_ycommon.json"
-                                elif flag_val == int(self.id[-1]) * 10:
+                                elif flag_val == int(self.id[1]) * 10:
                                     file_name = f"output/{self.id}_yunique_train.json"
                                 elif flag_val == -1:
                                     file_name = f"output/{self.id}_xtest.json"
@@ -320,7 +320,6 @@ class Slave(Agent):
                 )
                 await asyncio.sleep(1)
 
-    @async_timeit
     async def slave_main(self):
         await self.connect_to_redis()
         await self.create_consumer_group()
