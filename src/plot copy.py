@@ -95,12 +95,16 @@ fig, ax = plt.subplots(3, 1, figsize=(12, 6))
 ax[0].plot(x, mse, 'r')
 ax[0].set_title('LGBMRegressor')
 ax[0].set_ylabel('MSE')
-ax[0].set_xlabel('Common_Unique Ratio')
 ax[1].plot(x, mae, 'b')
 ax[1].set_ylabel('MAE')
 ax[2].plot(x, r2, 'g')
 ax[2].set_ylabel('R2')
-plt.show()
+ax[2].xaxis.labelpad = 10  # Add padding to x-label
+ax[2].set_xlabel('Common_Unique Ratio')
+plt.tight_layout()
+plt.savefig('Media/LGBMRegressor.png')
+plt.close()
+
 #%%
 mse=[i[1] for i in XGB]
 # remove the last comma and convert to float
@@ -116,12 +120,16 @@ fig, ax = plt.subplots(3, 1, figsize=(12, 6))
 ax[0].plot(x, mse, 'r')
 ax[0].set_title('XGBRegressor')
 ax[0].set_ylabel('MSE')
-ax[0].set_xlabel('Common_Unique Ratio')
 ax[1].plot(x, mae, 'b')
 ax[1].set_ylabel('MAE')
 ax[2].plot(x, r2, 'g')
 ax[2].set_ylabel('R2')
-plt.show()
+ax[2].xaxis.labelpad = 10  # Add padding to x-label
+ax[2].set_xlabel('Common_Unique Ratio')
+plt.tight_layout()
+plt.savefig('Media/XGBRegressor.png')
+plt.close()
+
 #%%
 mse=[i[1] for i in RDF]
 # remove the last comma and convert to float
@@ -137,12 +145,16 @@ fig, ax = plt.subplots(3, 1, figsize=(12, 6))
 ax[0].plot(x, mse, 'r')
 ax[0].set_title('RandomForestRegressor')
 ax[0].set_ylabel('MSE')
-ax[0].set_xlabel('Common_Unique Ratio')
 ax[1].plot(x, mae, 'b')
 ax[1].set_ylabel('MAE')
 ax[2].plot(x, r2, 'g')
 ax[2].set_ylabel('R2')
-plt.show()
+ax[2].xaxis.labelpad = 10  # Add padding to x-label
+ax[2].set_xlabel('Common_Unique Ratio')
+plt.tight_layout()
+plt.savefig('Media/RandomForestRegressor.png')
+plt.close()
+
 #%%
 mse=[i[1] for i in DTR]
 # remove the last comma and convert to float
@@ -158,12 +170,15 @@ fig, ax = plt.subplots(3, 1, figsize=(12, 6))
 ax[0].plot(x, mse, 'r')
 ax[0].set_title('DecisionTreeRegressor')
 ax[0].set_ylabel('MSE')
-ax[0].set_xlabel('Common_Unique Ratio')
 ax[1].plot(x, mae, 'b')
 ax[1].set_ylabel('MAE')
 ax[2].plot(x, r2, 'g')
 ax[2].set_ylabel('R2')
-plt.show()
+ax[2].xaxis.labelpad = 10  # Add padding to x-label
+ax[2].set_xlabel('Common_Unique Ratio')
+plt.tight_layout()
+plt.savefig('Media/DecisionTreeRegressor.png')
+plt.close()
 #%%
 
 
