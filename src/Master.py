@@ -31,16 +31,20 @@ class Master(Agent):
         common_ratio: float,
         test_ratio: float,
         validation_ratio: float,
+        y_column_name: str,
+        slave_count: int,
     ) -> None:
         super().__init__(id, IP, port, stream_name, group_name)
         self.dataset_path = dataset_path
-        self.slave_count = 0
         self.unique_data_sent = False
         self.delay = delay
         self.common_train_data_sent = False
         self.common_ratio: float = common_ratio
         self.test_ratio: float = test_ratio
         self.validation_ratio: float = validation_ratio
+        self.Y_column_name = y_column_name,
+        self.slave_count = slave_count
+
 
     def decode_list_of_bytes(self, nested_list):
         decoded_list = [
@@ -50,41 +54,6 @@ class Master(Agent):
         # create a dictionary from even-indexed and odd-indexed pairs for each sublist
         decoded_dict = [dict(zip(even[::2], even[1::2])) for even in decoded_list]
         return decoded_dict
-
-    async def slave_counter(self):
-        """
-        [{'name': 'group_1',
-        'consumers': 0,
-        'pending': 0,
-        'last-delivered-id': '0-0',
-        'entries-read': None,
-        'lag': 0}]
-        """
-        info = await self.r.execute_command("XINFO", "GROUPS", self.stream_name)
-
-        dictt = self.decode_list_of_bytes(info)
-        json_data = json.dumps(dictt, indent=4)
-        # pretty print
-        log.p_ok(f"data: {json_data}")
-
-        # check if consumers are bigger than 0
-        counter = 0
-        for i in dictt:
-            if i["consumers"] > 0:
-                counter += 1
-
-        with open("temp.txt", "a+") as f:
-            file_data = f.read()
-            print("file data: ", file_data)
-            if file_data == "true":
-                self.slave_count = counter
-                return
-            else:
-                f.write(f"true\n")
-                self.slave_count = len(dictt) - 1
-
-        log.p_ok(f"slave count: {self.slave_count}")
-        # create a file for keeping log on is this file executed before
 
     def split(
         self,
@@ -97,6 +66,9 @@ class Master(Agent):
         """
         Split the data into training and testing sets
         """
+        if type(Y_column_name) == tuple:
+            Y_column_name = Y_column_name[0]
+
         X = df.drop(columns=Y_column_name, axis=1)
         y = df[Y_column_name]
         x_train, x_test, y_train, y_test = train_test_split(
@@ -137,8 +109,10 @@ class Master(Agent):
 
             x_train_unique_split[i] = np.hstack((x_train_unique_split[i], new_column_x))
             x_train_unique_split[i] = pd.DataFrame(x_train_unique_split[i])
+            # get last column name xtrainuniquesplit
 
-            x_train_unique_split[i].rename(columns={4: "999"}, inplace=True)
+            x_train_last_column_name = x_train_unique_split[i].columns[-1]
+            x_train_unique_split[i].rename(columns={x_train_last_column_name: "999"}, inplace=True)
             x_train_unique_split[i]["999"] = new_column_x
 
             y_train_unique_split[i] = pd.DataFrame(y_train_unique_split[i])
@@ -151,7 +125,7 @@ class Master(Agent):
         x_train_common.columns = range(len(x_train_common.columns))
         y_train_common.columns = range(len(y_train_common.columns))
         x_train_common["999"] = 0
-        y_train_common["999"] = 79  # LV ActivePower (kW)
+        y_train_common["999"] = 79 
 
         y_test = pd.DataFrame(y_test)
         x_test.columns = range(len(x_test.columns))
@@ -165,8 +139,6 @@ class Master(Agent):
         x_val["999"]=-3
         y_val["999"]=-4
         
-
-
         return (
             x_train_unique_split,
             y_train_unique_split,
@@ -179,17 +151,6 @@ class Master(Agent):
         )
 
     async def send(self, dataTsend: pd.DataFrame, agentid: int, *args):
-        if agentid == -2:
-            log.p_warn(f"Validation dataset shape:\t{dataTsend.shape}")
-        if agentid == -1:
-            log.p_warn(f"test dataset shape:\t\t{dataTsend.shape}")
-        elif agentid == 0:
-            log.p_warn(f"Common dataset shape:\t\t{dataTsend.shape}")
-        elif agentid % 10 == 0:
-            log.p_warn(f"y training dataset shape:\t{dataTsend.shape}")
-        else:
-            log.p_warn(f"Agent{agentid} dataset shape:\t{dataTsend.shape}")
-
         try:
             for index, row in dataTsend.iterrows():
                 await self.write(row.to_dict())
@@ -349,35 +310,38 @@ class Master(Agent):
     async def master_main(self):
         await self.connect_to_redis()
         await self.create_consumer_group()
-        await self.slave_counter()
         log.p_ok(f"{log.p_bold(self.id)} Slave count: {self.slave_count}")
 
         if not os.path.exists('output'):
             # create output dir
             os.makedirs("output")
 
-        splits = self.split(
-            self.read_csv(self.dataset_path),
-            number_of_slaves=self.slave_count,
-            Y_column_name="LV ActivePower (kW)",
-        )
+            splits = self.split(
+                self.read_csv(self.dataset_path),
+                number_of_slaves=self.slave_count,
+                Y_column_name=self.Y_column_name,
+            )
 
-        try:
-            await self.send_all(splits)
-        except:
-            log.p_fail(f"{log.p_bold(self.id)} {e}")
-        finally:
+            try:
+                await self.send_all(splits)
+            except:
+                log.p_fail(f"{log.p_bold(self.id)} {e}")
+            finally:
+                print("reading from slaves")
+                await self.read_from_slaves()
+
+
+            try:
+                await self.r.execute_command("XGROUP", "DESTROY", self.stream_name, self.group_name)
+            except Exception as e:
+                log.p_fail(f"{log.p_bold(self.id)} {e}")
+
+            if self.unique_data_sent:
+                log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+
+            if self.common_train_data_sent:
+                log.p_ok(f"{log.p_bold(self.id)} Common data sent")
+        else:
+            log.p_ok(f"{log.p_bold(self.id)} Output directory exists")
             print("reading from slaves")
             await self.read_from_slaves()
-
-
-        try:
-            await self.r.execute_command("XGROUP", "DESTROY", self.stream_name, self.group_name)
-        except Exception as e:
-            log.p_fail(f"{log.p_bold(self.id)} {e}")
-
-        if self.unique_data_sent:
-            log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
-
-        if self.common_train_data_sent:
-            log.p_ok(f"{log.p_bold(self.id)} Common data sent")

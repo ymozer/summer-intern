@@ -1,4 +1,10 @@
 # summer-intern
+in ini file slave agent's name must end with integer and must me sequential. 
+For example: 
+agent1, agent2, agent3, agent4 or 
+a1, a2, a3, a4 or
+xgboost1, adaboost2, lightgbm3, randomforest4
+
 ## Development
 
 ``` bash

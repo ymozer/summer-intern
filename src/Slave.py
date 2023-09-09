@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import asyncio
@@ -11,6 +12,7 @@ from utils.timeit import async_timeit
 
 from sklearn.base import BaseEstimator
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.feature_selection import SelectKBest, f_regression, SelectFromModel
 
 import tensorflow as tf
 from keras import datasets, layers, models
@@ -25,6 +27,10 @@ from utils.spinner import Spinner
 
 from lightgbm import LGBMRegressor
 from xgboost  import XGBRegressor
+from sklearn.svm import SVR
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV
 
 log = LogColor()
 
@@ -96,25 +102,16 @@ class Slave(Agent):
             log.p_fail(e.__traceback__.tb_lineno)
 
         try:
-            format_string = "%d %m %Y %H:%M"
+            
             self.X_unique = pd.DataFrame(X["data"]).drop(columns=["999"])
-            self.X_unique["0"] = pd.to_datetime(self.X_unique["0"], format=format_string).astype("int")
-
             self.X_test = pd.DataFrame(X_test["data"]).drop(columns=["999"])
-            self.X_test["0"] = pd.to_datetime(self.X_test["0"], format=format_string).astype("int")
-
             self.y_test = pd.DataFrame(y_test["data"]).drop(columns=["999"])
             self.y_test = self.y_test.to_numpy().ravel()
-
             self.X_common = pd.DataFrame(X_common["data"]).drop(columns=["999"])
-            self.X_common["0"] = pd.to_datetime(self.X_common["0"], format=format_string).astype("int")
-
             self.y_unique = pd.DataFrame(y["data"]).drop(columns=["999"])
             self.y_common = pd.DataFrame(y_common["data"]).drop(columns=["999"])
 
             self.X_val = pd.DataFrame(X_val["data"]).drop(columns=["999"])
-            self.X_val["0"] = pd.to_datetime(self.X_val["0"], format=format_string).astype("int")
-
             self.y_val = pd.DataFrame(y_val["data"]).drop(columns=["999"])
             self.y_val = self.y_val.to_numpy().ravel()
 
@@ -147,72 +144,120 @@ class Slave(Agent):
                 log.p_warn("LGBMRegressor")
             elif str(type(self.model)) == str(type(XGBRegressor())):
                 log.p_warn("XGBRegressor")
+            elif str(type(self.model)) == str(type(SVR())):
+                log.p_warn("SVR")
             else:
                 log.p_warn("Predict default models")
                 await self.my_predict()
             return
         
-        try:
-            # train model
-            if str(type(self.model)) == str(type(LGBMRegressor()))\
-                or str(type(self.model)) == str(type(XGBRegressor())):
-                num_round = 10
-                self.X_train = self.X_train.to_numpy()
-                self.X_val = self.X_val.to_numpy()
-                self.model.fit(self.X_train, self.y_train, eval_set=[(self.X_val, self.y_val)])
-                self.model_trained_time = time.time() - start
-                self.model_trained_time_str = datetime.fromtimestamp(
-                    self.model_trained_time
-                ).strftime("%d/%m/%Y %H:%M:%S")
-                log.p_header(f"Model {self.model} trained with time: {self.model_trained_time:.2f} sec")
-            else:
-                log.p_warn("Default models")
-                self.model.fit(self.X_train, self.y_train)
+        else:
+            log.p_ok(f"Model {self.model} not trained")
 
-            # save model to pickle file
-            with open(f"models/{self.id}_model.pkl", "wb") as f:
-                pickle.dump(self.model, f)
-            log.p_ok(f"Model {self.model} pickled")
+            try:
+                #self.X_train = SelectKBest(f_regression, k=5).fit_transform(self.X_train, self.y_train)
+                #self.X_test = SelectKBest(f_regression, k=5).fit_transform(self.X_test, self.y_test)
+                #self.X_val = SelectKBest(f_regression, k=5).fit_transform(self.X_val, self.y_val)
+                #self.X_train = SelectFromModel(self.model, prefit=False).fit_transform(self.X_train, self.y_train)
+                #self.X_test = SelectFromModel(self.model, prefit=False).fit_transform(self.X_test, self.y_test)
+                #self.X_val = SelectFromModel(self.model, prefit=False).fit_transform(self.X_val, self.y_val)
 
-            # log
-            self.model_trained = False # TODO: change this to True
-            self.model_trained_time = time.time()
-            self.model_trained_time_str = datetime.fromtimestamp(
-                self.model_trained_time
-            ).strftime("%d/%m/%Y %H:%M:%S")
-            log.p_ok(f"Model {type(self.model).__name__} trained at {self.model_trained_time_str}")
+                # train model
+                if str(type(self.model)) == str(type(LGBMRegressor()))\
+                    or str(type(self.model)) == str(type(XGBRegressor())):
+                    
+                    self.X_train = self.X_train.to_numpy()
+                    self.X_val = self.X_val.to_numpy()
+                    self.model.fit(self.X_train, self.y_train, eval_set=[(self.X_val, self.y_val)])
+                    self.model_trained_time = time.time() - start
+                    log.p_header(f"Model {self.model} trained with time: {self.model_trained_time:.2f} sec")
 
-            '''
-            Predict
-            '''
-            await self.my_predict()
+                elif str(type(self.model)) == str(type(SVR())):
+                    log.p_underline("SVR")
+                    pipeline = Pipeline([
+                        ('scaler', StandardScaler()),  
+                        ('svr', self.model) 
+                    ])
+                    try:
+                        pipeline.fit(self.X_train, self.y_train)
+                        self.model = pipeline
+                        '''
+                        # Define a grid of hyperparameters to search
+                        param_grid = {
+                            'svr__kernel': ['linear', 'rbf', 'poly'],  # Kernels to try
+                            'svr__C': [0.1, 1, 10],  # Regularization parameter
+                            'svr__gamma': [0.1, 1, 'scale', 'auto'],  # Kernel coefficient (only for 'rbf' and 'poly' kernels)
+                            'svr__degree': [2, 3]  # Polynomial degree (only for 'poly' kernel)
+                        }
 
-        except Exception as e:
-            log.p_fail(e)
-            log.p_fail(e.__traceback__.tb_lineno)
+                        # Create a GridSearchCV object
+                        grid_search = GridSearchCV(estimator=pipeline, param_grid=param_grid, cv=2, scoring='neg_mean_squared_error',verbose=3)
+                        # Fit the grid search to the data
+                        grid_search.fit(self.X_train, self.y_train)
+
+                        # Get the best parameters and estimator from the grid search
+                        best_params = grid_search.best_params_
+                        best_estimator = grid_search.best_estimator_
+
+                        # Print the best hyperparameters
+                        log.p_header(f"Best hyperparameters:\n{best_params}\n")
+
+                        # Print the best model
+                        log.p_header(f"Best model:\n{best_estimator}\n")
+                        self.model=best_estimator
+                        '''
+
+                        self.model_trained_time = time.time() - start
+                        log.p_header(f"Model {self.model} trained with time: {self.model_trained_time:.2f} sec")
+                    except Exception as e:
+                        log.p_fail("Pipeline fit failed", e)
+                        log.p_fail(e.__traceback__.tb_lineno)
+                else:
+                    log.p_warn("Default models")
+                    self.model.fit(self.X_train, self.y_train)
+
+                # save model to pickle file
+                with open(f"models/{self.id}_model.pkl", "wb") as f:
+                    pickle.dump(self.model, f)
+                log.p_ok(f"Model {self.model} pickled")
+
+                await self.my_predict()
+
+            except Exception as e:
+                log.p_fail(e)
+                log.p_fail(e.__traceback__.tb_lineno)
 
     async def my_predict(self):
-        if str(type(self.model)) == str(type(LGBMRegressor())) or str(type(self.model)) == str(type(XGBRegressor())):
-            log.p_warn("LGBMRegressor or XGBRegressor")
+        if str(type(self.model)) == str(type(LGBMRegressor())) or\
+            str(type(self.model)) == str(type(XGBRegressor())):
             self.X_test = self.X_test.to_numpy()
             try:
                 y_pred = self.model.predict(self.X_test)
             except Exception as e:
                 log.p_fail("Predict failed", e)
-                log.p_fail(e.__traceback__.tb_lineno)
+                log.p_fail(f"{e.__traceback__.tb_lineno}")
 
         else:
             y_pred=self.model.predict(self.X_test)
+        
         log.p_ok(f"Model {self.model} predicted")
         # metrics 
         self.mse = mean_squared_error(self.y_test, y_pred)
         self.mae = mean_absolute_error(self.y_test, y_pred)
         self.r2 = r2_score(self.y_test, y_pred)
         log.p_ok(f"Model {self.model} metrics: mse: {self.mse}, mae: {self.mae}, r2: {self.r2}")
+        
         # write metrics to file
         with open(f"models/{self.id}_metrics.txt", "w") as f:
-            f.write(f"{self.model_trained_time_str}\n")
-            f.write(f"{self.model} mse: {self.mse}, mae: {self.mae}, r2: {self.r2}\n")
+            f.write(f"{self.model_trained_time:.2f} second\n")
+            f.write(f"{self.model}\n mse: {self.mse}, mae: {self.mae}, r2: {self.r2}\n")
+
+        # save predictions and y test to file side by side
+        with open(f"models/{self.id}_predictions.csv", "w") as f:
+            f.write("y_pred;y_test\n")
+            for i in range(len(y_pred)):
+                f.write(f"{y_pred[i]:.2f};{self.y_test[i]}\n")
+        
 
     async def CNN(self):
         try:
@@ -236,7 +281,6 @@ class Slave(Agent):
             log.p_fail(e)
             log.p_fail(e.__traceback__.tb_lineno)
 
-
     async def read(self):
         no_data_timer = 0
         while True:
@@ -255,23 +299,24 @@ class Slave(Agent):
                             last_col  = decoded_dict["999"]           
                             if last_col == "END":
                                 break
+                            letterless_id = re.sub(r'[a-zA-Z]', '', self.id)[0]
                             flag_val = int(float(last_col))
                             if (
-                                flag_val == int(self.id[1])
-                                or flag_val == 0
-                                or flag_val == int(self.id[1]) * 10
-                                or flag_val == int(79)
-                                or flag_val == -1
-                                or flag_val == -2
-                                or flag_val == -3
-                                or flag_val == -4
+                                flag_val    == int(letterless_id)      # train x unique
+                                or flag_val == int(letterless_id) * 10 # train y unique
+                                or flag_val == 0                    # common x
+                                or flag_val == int(79)              # common y    
+                                or flag_val == -1                   # test x
+                                or flag_val == -2                   # test y
+                                or flag_val == -3                   # val x
+                                or flag_val == -4                   # val y
                             ):
                                 # TODO: if shape == Ytrain, ignore date to float conversion
                                 if flag_val == 0:
                                     file_name = f"output/{self.id}_xcommon.json"
                                 elif flag_val == int(79):
                                     file_name = f"output/{self.id}_ycommon.json"
-                                elif flag_val == int(self.id[1]) * 10:
+                                elif flag_val == int(letterless_id) * 10:
                                     file_name = f"output/{self.id}_yunique_train.json"
                                 elif flag_val == -1:
                                     file_name = f"output/{self.id}_xtest.json"
@@ -299,7 +344,7 @@ class Slave(Agent):
                     log.p_fail(f"{log.p_bold(self.id)} No data to read")
                     await asyncio.sleep(1)
                     no_data_timer += 1
-                    if no_data_timer == 3:
+                    if no_data_timer == 10:
                         log.p_fail(
                             f"{log.p_bold(self.id)} No data to read for 10 seconds"
                         )
@@ -318,6 +363,7 @@ class Slave(Agent):
                 log.p_fail(
                     f"{log.p_bold(self.id)} Redis Read Exception: {e.with_traceback(e.__traceback__)}{e.__cause__}"
                 )
+                log.p_fail(e.__traceback__.tb_lineno)
                 await asyncio.sleep(1)
 
     async def slave_main(self):
