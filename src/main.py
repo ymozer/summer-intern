@@ -263,6 +263,7 @@ if __name__ == "__main__":
 
     elif sys.platform == "win32":
         with asyncio.Runner() as runner:
+            print('platform is Windows')
             try:
                 runner.run(main())
             finally:

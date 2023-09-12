@@ -259,17 +259,21 @@ class Slave(Agent):
         self.mae = mean_absolute_error(self.y_test, y_pred)
         self.r2 = r2_score(self.y_test, y_pred)
         log.p_ok(f"Model {self.model} metrics: mse: {self.mse}, mae: {self.mae}, r2: {self.r2}")
-        
-        # write metrics to file
-        with open(f"models/{self.id}_metrics.txt", "w") as f:
-            f.write(f"{self.model_trained_time:.2f} second\n")
-            f.write(f"{self.model}\n mse: {self.mse}, mae: {self.mae}, r2: {self.r2}\n")
+        try:
+            # write metrics to file
+            with open(f"models/{self.id}_metrics.txt", "w") as f:
+                f.write(f"{self.model_trained_time} second\n")
+                f.write(f"{str(self.model)}\n mse: {self.mse}, mae: {self.mae}, r2: {self.r2}\n")
 
-        # save predictions and y test to file side by side
-        with open(f"models/{self.id}_predictions.csv", "w") as f:
-            f.write("y_pred;y_test\n")
-            for i in range(len(y_pred)):
-                f.write(f"{y_pred[i]:.2f};{self.y_test[i]}\n")
+            # save predictions and y test to file side by side
+            with open(f"models/{self.id}_predictions.csv", "w") as f:
+                f.write("y_pred;y_test\n")
+                for i in range(len(y_pred)):
+                    f.write(f"{y_pred[i]:.2f};{self.y_test[i]}\n")
+        except Exception as e:
+            log.p_fail("Write metrics and pred error ",e)
+
+
         
 
     async def CNN(self):
@@ -356,7 +360,8 @@ class Slave(Agent):
                 else:
                     log.p_fail(f"{log.p_bold(self.id)} No data to read")
                     await asyncio.sleep(1)
-                    if timer < self.no_data_timer+1:
+                    timer += 1
+                    if timer > self.no_data_timer:
                         log.p_fail(
                             f"{log.p_bold(self.id)} No data to read for {self.no_data_timer} seconds"
                         )
@@ -369,7 +374,7 @@ class Slave(Agent):
                                 if get_last_character_from_file(j) != "}":
                                     remove_last_comma_from_file(j)
                                     f.write("\n]}")
-                        timer += 1
+                        
                         return
 
             except Exception as e:
