@@ -31,4 +31,4 @@ python src/main.py --slave agent1 agent2 agent3 agent4
 - [ ] code doesnt exits because of slave listen loop
 - [ ] reading from slaves and saving it to a file not working properly
 - [ ] Code exits after group and consumer creation, master not sending data
-
+- [ ] Check after slave reading is done if data consistent between X and y or row count...
