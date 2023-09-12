@@ -1,6 +1,5 @@
 import os
 import sys
-import uvloop
 import asyncio
 import configparser
 import redis.asyncio as redis
@@ -254,6 +253,7 @@ if __name__ == "__main__":
 
     # if system is macos, use uvloop
     if sys.platform == "darwin":
+        import uvloop
         with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
             try:
                 runner.run(main())
