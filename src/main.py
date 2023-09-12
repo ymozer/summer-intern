@@ -244,7 +244,7 @@ if __name__ == "__main__":
                     config.get     ("center", "group"),
                     slave_name_list,
                     slave_model_list,
-                    config.getint  ("center", "delay_read")
+                    config.getint  ("general", "delay_read")
                 )
             except Exception as e:
                 log.p_fail(f"Run Once Exception: {e}")
