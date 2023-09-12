@@ -209,11 +209,14 @@ if __name__ == "__main__":
         sections = config.sections()
         slave_name_list = []
         slave_model_list = []
+        
         for section in sections:
             if section.startswith("slave"):
                 slave_name_list.append(config.get(section, "name"))
                 slave_model_list.append(eval(eval(config.get(section, "model"))))
-        
+        print(slave_name_list)
+        print(slave_model_list)
+
         if config.getboolean("general", "run_different_ratios"):
             try:
                 await run_different_ratios(

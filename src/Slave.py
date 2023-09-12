@@ -228,6 +228,8 @@ class Slave(Agent):
                 else:
                     log.p_warn("Default models")
                     self.model.fit(self.X_train, self.y_train)
+                    self.model_trained_time = time.time() - start
+                    log.p_header(f"Model {self.model} trained with time: {self.model_trained_time:.2f} sec")
 
                 # save model to pickle file
                 with open(f"models/{self.id}_model.pkl", "wb") as f:
@@ -263,7 +265,7 @@ class Slave(Agent):
             # write metrics to file
             with open(f"models/{self.id}_metrics.txt", "w") as f:
                 f.write(f"{self.model_trained_time} second\n")
-                f.write(f"{str(self.model)}\n mse: {self.mse}, mae: {self.mae}, r2: {self.r2}\n")
+                f.write(f"{self.model}\n mse: {self.mse}, mae: {self.mae}, r2: {self.r2}\n")
 
             # save predictions and y test to file side by side
             with open(f"models/{self.id}_predictions.csv", "w") as f:
@@ -271,7 +273,7 @@ class Slave(Agent):
                 for i in range(len(y_pred)):
                     f.write(f"{y_pred[i]:.2f};{self.y_test[i]}\n")
         except Exception as e:
-            log.p_fail("Write metrics and pred error ",e)
+            log.p_fail("Write metrics and pred error: ",e)
 
 
         

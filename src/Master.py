@@ -174,12 +174,10 @@ class Master(Agent):
         df_xuniques = []
         for i in x_train_unique:
             df_xuniques.append(pd.DataFrame(i))
-            print(f"shape: {pd.DataFrame(i).shape}" )
 
         df_yuniques = []
         for i in y_train_unique:
             df_yuniques.append(pd.DataFrame(i))
-            print(f"shape: {pd.DataFrame(i).shape}" )
 
         df_commons = []
         df_commons.append(x_train_common)
@@ -204,7 +202,7 @@ class Master(Agent):
         done1, pending1 = await asyncio.wait(
             tasks_x_unique, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"X unique sended to all agents.\n{done1}\n{pending1}\n")
+        log.p_header(f"X unique sended to all agents.")
 
         """
         Send Unique Y Data to slaves. Sending index * 10 for 
@@ -218,7 +216,7 @@ class Master(Agent):
         done2, pending2 = await asyncio.wait(
             tasks_y_unique, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"Y unique sended to all agents.\n{done2}\n{pending2}\n")
+        log.p_header(f"Y unique sended to all agents.")
         self.unique_data_sent = True
 
         """
@@ -245,7 +243,7 @@ class Master(Agent):
         done4, pending4 = await asyncio.wait(
             tasks, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"Test data sended to all agents.\n{done4}\n{pending4}\n")
+        log.p_header(f"Test data sended to all agents.")
 
         """
         Send validation data to slaves
@@ -256,7 +254,7 @@ class Master(Agent):
         done5, pending5 = await asyncio.wait(
             tasks, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"Validation data sended to all agents.\n{done5}\n{pending5}\n")
+        log.p_header(f"Validation data sended to all agents.")
         return
     
     async def read_from_slaves(self):
@@ -327,7 +325,7 @@ class Master(Agent):
             except:
                 log.p_fail(f"{log.p_bold(self.id)} {e}")
             finally:
-                print("reading from slaves")
+                log.p_okblue("Master reading from slaves for metrics")
                 await self.read_from_slaves()
 
 
@@ -342,6 +340,6 @@ class Master(Agent):
             if self.common_train_data_sent:
                 log.p_ok(f"{log.p_bold(self.id)} Common data sent")
         else:
-            log.p_ok(f"{log.p_bold(self.id)} Output directory exists")
+            log.p_ok(f"{log.p_bold(self.id)} Output directory exists.\nGoing straigth to training and predicting.")
             print("reading from slaves")
             await self.read_from_slaves()
