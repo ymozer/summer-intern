@@ -131,7 +131,8 @@ if __name__ == "__main__":
                     "stream_1",
                     f"group_{counter+2}",
                     slave_model_list[counter],
-                    {}
+                    {},
+                    3
                 )
                 slave_instances.append(ins.slave_main())
                 counter += 1
@@ -153,7 +154,9 @@ if __name__ == "__main__":
                        stream_name,
                        master_group_name,
                        slave_name_list:list,
-                       slave_model_list:list):
+                       slave_model_list:list,
+                       delay=0 
+                       ):
         '''
         Run master and slave instances for a single common-unique ratio
         '''
@@ -187,7 +190,8 @@ if __name__ == "__main__":
                 stream_name,
                 f"group_{counter+2}",
                 slave_model_list[counter],
-                {}
+                {},
+                delay
             )
 
             slave_instances.append(ins.slave_main())
@@ -240,16 +244,30 @@ if __name__ == "__main__":
                     config.get     ("center", "stream"),
                     config.get     ("center", "group"),
                     slave_name_list,
-                    slave_model_list
+                    slave_model_list,
+                    config.getint  ("center", "delay_read")
                 )
             except Exception as e:
                 log.p_fail(f"Run Once Exception: {e}")
                 log.p_fail(e.__traceback__.tb_lineno)
                 sys.exit(1)
 
-    with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
-        try:
-            runner.run(main())
-        finally:
-            log.p_warn("QUITTING")
-            sys.exit(1)
+    # if system is macos, use uvloop
+    if sys.platform == "darwin":
+        with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
+            try:
+                runner.run(main())
+            finally:
+                log.p_warn("QUITTING")
+                sys.exit(1)
+
+    elif sys.platform == "win32":
+        with asyncio.Runner() as runner:
+            try:
+                runner.run(main())
+            finally:
+                log.p_warn("QUITTING")
+                sys.exit(1)
+    else :
+        log.p_fail("Unsupported OS")
+

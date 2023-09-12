@@ -7,32 +7,26 @@ import aiofiles
 import pickle
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from utils.timeit import async_timeit
+
+from keras import Sequential
+from keras.layers import Dense
 
 from sklearn.base import BaseEstimator
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.feature_selection import SelectKBest, f_regression, SelectFromModel
 
-import tensorflow as tf
-from keras import datasets, layers, models
-from keras import Sequential
-from keras.layers import Dense
-import matplotlib.pyplot as plt
+
+from sklearn.svm import SVR
+from xgboost  import XGBRegressor
+from lightgbm import LGBMRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from Agent import Agent
 from log.color import LogColor
 from utils.file import file_control, get_last_character_from_file
-from utils.spinner import Spinner
-
-from lightgbm import LGBMRegressor
-from xgboost  import XGBRegressor
-from sklearn.svm import SVR
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import GridSearchCV
 
 log = LogColor()
+
 
 class Slave(Agent):
     def __init__(
@@ -44,6 +38,7 @@ class Slave(Agent):
         group_name: str,
         model: BaseEstimator,
         model_params: dict,
+        no_data_timer: int,
     ) -> None:
         super().__init__(id, IP, port, stream_name, group_name)
         self.X_unique               = None
@@ -68,6 +63,7 @@ class Slave(Agent):
         self.model_trained_time     = None
         self.model_trained_time_str = None
         self.model_params           = model_params
+        self.no_data_timer          = no_data_timer
 
     
     async def load_dataset(self):
@@ -212,6 +208,23 @@ class Slave(Agent):
                     except Exception as e:
                         log.p_fail("Pipeline fit failed", e)
                         log.p_fail(e.__traceback__.tb_lineno)
+                elif str(type(self.model)) == str(type(Sequential())):
+                    try:
+                        self.model = Sequential([
+                            Dense(64, activation='relu', input_shape=(self.X_train.shape[1],)),
+                            Dense(32, activation='relu'),
+                            Dense(1)  # Output layer with 1 neuron for regression
+                        ])
+                        # Compile the model
+                        self.model.compile(optimizer='adam', loss='mean_squared_error')
+                        history = self.model.fit(self.X_train, self.y_train, epochs=50, batch_size=32, validation_split=0.2)
+                        self.model.save(f'models/{self.id}_cnn.h5')
+                        loss = self.model.evaluate(self.X_test, self.y_test)
+                        print(f"Test Loss: {loss}")
+                    except Exception as e:
+                        log.p_fail("Sequential fit failed", e)
+                        log.p_fail(e.__traceback__.tb_lineno)
+                    pass
                 else:
                     log.p_warn("Default models")
                     self.model.fit(self.X_train, self.y_train)
@@ -282,7 +295,7 @@ class Slave(Agent):
             log.p_fail(e.__traceback__.tb_lineno)
 
     async def read(self):
-        no_data_timer = 0
+        timer = 0
         while True:
             file_name = f"output/{self.id}_xunique_train.json"
             try:
@@ -343,10 +356,9 @@ class Slave(Agent):
                 else:
                     log.p_fail(f"{log.p_bold(self.id)} No data to read")
                     await asyncio.sleep(1)
-                    no_data_timer += 1
-                    if no_data_timer == 10:
+                    if timer < self.no_data_timer+1:
                         log.p_fail(
-                            f"{log.p_bold(self.id)} No data to read for 10 seconds"
+                            f"{log.p_bold(self.id)} No data to read for {self.no_data_timer} seconds"
                         )
                         # list all files in output dir
                         output_files = os.listdir("output")
@@ -357,6 +369,7 @@ class Slave(Agent):
                                 if get_last_character_from_file(j) != "}":
                                     remove_last_comma_from_file(j)
                                     f.write("\n]}")
+                        timer += 1
                         return
 
             except Exception as e:
