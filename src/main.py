@@ -1,6 +1,9 @@
 import os
 import sys
 import asyncio
+import subprocess
+import threading
+import docker
 import redis.asyncio as redis
 
 # Redis exceptions
@@ -27,6 +30,15 @@ from sklearn.ensemble import (
 
 log=LogColor()
 
+def check_container_exists(container_name):
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_name)
+        return True
+    except docker.errors.NotFound:
+        return False
+    
+
 if __name__ == "__main__":
     slave_list = ["agent1", "agent2", "agent3", "agent4"]
     model_names=[LinearRegression(), RandomForestRegressor(), DecisionTreeRegressor(), AdaBoostRegressor(), LGBMRegressor()]
@@ -41,6 +53,21 @@ if __name__ == "__main__":
         default=slave_list,
         help="Slave names separated by space",
     )
+    '''
+    container_name = "intern-cache-1"
+    if check_container_exists(container_name):
+        # docker stop intern-cache-1 with docker sdk
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        container.stop()
+        container.remove()
+        # docker volume rm intern_cache
+        client.volumes.get("intern_cache").remove()
+    '''
+    # docker-compose -f docker-compose.yml up
+    # Create a thread to run the Docker Compose command
+
+
     async def main():
         args = parser.parse_args()
         slave_instances = []

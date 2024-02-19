@@ -50,7 +50,7 @@ class Master(Agent):
         for i in dictt:
             if i["consumers"] > 0:
                 counter += 1
-        self.slave_count = len(dictt) - 2
+        self.slave_count = len(dictt) - 1
 
         log.p_ok(f"slave count: {self.slave_count}")
         # create a file for keeping log on is this file executed before
