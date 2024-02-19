@@ -33,4 +33,4 @@ def async_timeit(func, *args, **params):
             print(f'\n>>> Time took for {func.__name__} {sec} with id: {args[1]}')
         print(f'>>> Time took for {func.__name__} function {sec} sec')
         return result
-    return helper
+

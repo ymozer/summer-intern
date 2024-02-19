@@ -1,9 +1,16 @@
 # summer-intern
+in ini file slave agent's name must end with integer and must me sequential. 
+For example: 
+agent1, agent2, agent3, agent4 or 
+a1, a2, a3, a4 or
+xgboost1, adaboost2, lightgbm3, randomforest4
+
 ## Development
 
 ``` bash
 # for lightgbm installation https://lightgbm.readthedocs.io/en/stable/Installation-Guide.html#visual-studio-or-vs-build-tools
 
+docker-compose -f .\docker-compose.yml up
 # after cloning and navigating to the directory
 python -m venv venv
 source venv/bin/activate # for linux and mac
@@ -18,12 +25,10 @@ python src/main.py --slave agent1 agent2 agent3 agent4
 ```
 
 ## TO-DO's
-- [ ] Fix slave count --> master
 - [ ] Best slave selection
-- [ ] Combine unique and common
-    - for now training only done with unique, with no common dataset input 
-- [ ] xgboost,lightgbm model
-- [ ] timing for each agent
 - [ ] voting for regression models
 - [ ] training unique and common ratio between (0,100,5) 
-
+- [ ] code doesnt exits because of slave listen loop
+- [ ] reading from slaves and saving it to a file not working properly
+- [ ] Code exits after group and consumer creation, master not sending data
+- [ ] Check after slave reading is done if data consistent between X and y or row count...

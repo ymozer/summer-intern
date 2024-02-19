@@ -28,13 +28,22 @@ class Master(Agent):
         group_name: str,
         delay: float,
         dataset_path: str,
+        common_ratio: float,
+        test_ratio: float,
+        validation_ratio: float,
+        y_column_name: str,
+        slave_count: int,
     ) -> None:
         super().__init__(id, IP, port, stream_name, group_name)
         self.dataset_path = dataset_path
-        self.slave_count = 0
         self.unique_data_sent = False
         self.delay = delay
         self.common_train_data_sent = False
+        self.common_ratio: float = common_ratio
+        self.test_ratio: float = test_ratio
+        self.validation_ratio: float = validation_ratio
+        self.Y_column_name = y_column_name,
+        self.slave_count = slave_count
 
 
     async def slave_counter(self):
@@ -54,25 +63,33 @@ class Master(Agent):
 
         log.p_ok(f"slave count: {self.slave_count}")
         # create a file for keeping log on is this file executed before
+    def decode_list_of_bytes(self, nested_list):
+        decoded_list = [
+            [item.decode() if isinstance(item, bytes) else item for item in sublist]
+            for sublist in nested_list
+        ]
+        # create a dictionary from even-indexed and odd-indexed pairs for each sublist
+        decoded_dict = [dict(zip(even[::2], even[1::2])) for even in decoded_list]
+        return decoded_dict
 
     def split(
         self,
         df,
         number_of_slaves: int = 2,
         Y_column_name: str = "LV ActivePower (kW)",
-        validation_ratio: float = 0.2,
-        test_ratio: float = 0.2,
-        common_ratio: float = 0.2,
         random_state: int = 42,
-        shuffle: bool = True,
+        shuffle: bool = False,
     ):
         """
         Split the data into training and testing sets
         """
+        if type(Y_column_name) == tuple:
+            Y_column_name = Y_column_name[0]
+
         X = df.drop(columns=Y_column_name, axis=1)
         y = df[Y_column_name]
         x_train, x_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_ratio,
+            X, y, test_size=self.test_ratio,
             random_state=random_state, shuffle=shuffle
         )
 
@@ -80,14 +97,14 @@ class Master(Agent):
         # split training data into training and validation
         # 0.25 x 0.8 = 0.2
         (x_train, x_val, y_train, y_val) = train_test_split(
-            x_train, y_train, test_size=validation_ratio, 
+            x_train, y_train, test_size=self.validation_ratio, 
             random_state=random_state, shuffle=shuffle
         ) 
 
         # split training again for unique and common
         (x_train_unique, x_train_common,
           y_train_unique,y_train_common) = train_test_split(
-            x_train, y_train, test_size=common_ratio,
+            x_train, y_train, test_size=self.common_ratio,
             random_state=random_state, shuffle=shuffle
         )
 
@@ -109,8 +126,10 @@ class Master(Agent):
 
             x_train_unique_split[i] = np.hstack((x_train_unique_split[i], new_column_x))
             x_train_unique_split[i] = pd.DataFrame(x_train_unique_split[i])
+            # get last column name xtrainuniquesplit
 
-            x_train_unique_split[i].rename(columns={4: "999"}, inplace=True)
+            x_train_last_column_name = x_train_unique_split[i].columns[-1]
+            x_train_unique_split[i].rename(columns={x_train_last_column_name: "999"}, inplace=True)
             x_train_unique_split[i]["999"] = new_column_x
 
             y_train_unique_split[i] = pd.DataFrame(y_train_unique_split[i])
@@ -123,7 +142,7 @@ class Master(Agent):
         x_train_common.columns = range(len(x_train_common.columns))
         y_train_common.columns = range(len(y_train_common.columns))
         x_train_common["999"] = 0
-        y_train_common["999"] = 79  # LV ActivePower (kW)
+        y_train_common["999"] = 79 
 
         y_test = pd.DataFrame(y_test)
         x_test.columns = range(len(x_test.columns))
@@ -136,8 +155,7 @@ class Master(Agent):
         y_val.columns = range(len(y_val.columns))
         x_val["999"]=-3
         y_val["999"]=-4
-
-
+        
         return (
             x_train_unique_split,
             y_train_unique_split,
@@ -150,17 +168,6 @@ class Master(Agent):
         )
 
     async def send(self, dataTsend: pd.DataFrame, agentid: int, *args):
-        if agentid == -2:
-            log.p_warn(f"Validation dataset shape:\t{dataTsend.shape}")
-        if agentid == -1:
-            log.p_warn(f"test dataset shape:\t\t{dataTsend.shape}")
-        elif agentid == 0:
-            log.p_warn(f"Common dataset shape:\t\t{dataTsend.shape}")
-        elif agentid % 10 == 0:
-            log.p_warn(f"y training dataset shape:\t{dataTsend.shape}")
-        else:
-            log.p_warn(f"Agent{agentid} dataset shape:\t{dataTsend.shape}")
-
         try:
             for index, row in dataTsend.iterrows():
                 await self.write(row.to_dict())
@@ -169,13 +176,6 @@ class Master(Agent):
         return
 
     async def send_all(self, splits):
-        """
-        I want to make each sending process blocking. For example:
-        First send x_train_unique
-        Second send y_train_unique and so on
-
-        Need to figure out slowing sending process down.
-        """
         x_train_unique = splits[0]
         y_train_unique = splits[1]
         x_train_common = splits[2]
@@ -216,11 +216,10 @@ class Master(Agent):
         for index, data_item in enumerate(df_xuniques, start=1):
             task = asyncio.create_task(self.send(data_item, index))
             tasks_x_unique.append(task)
-        print(f"Sending {len(tasks_x_unique)} unique datasets")
         done1, pending1 = await asyncio.wait(
             tasks_x_unique, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"X unique sended to all agents.\n{done1}\n{pending1}\n")
+        log.p_header(f"X unique sended to all agents.")
 
         """
         Send Unique Y Data to slaves. Sending index * 10 for 
@@ -234,7 +233,7 @@ class Master(Agent):
         done2, pending2 = await asyncio.wait(
             tasks_y_unique, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"Y unique sended to all agents.\n{done2}\n{pending2}\n")
+        log.p_header(f"Y unique sended to all agents.")
         self.unique_data_sent = True
 
         """
@@ -261,7 +260,7 @@ class Master(Agent):
         done4, pending4 = await asyncio.wait(
             tasks, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"Test data sended to all agents.\n{done4}\n{pending4}\n")
+        log.p_header(f"Test data sended to all agents.")
 
         """
         Send validation data to slaves
@@ -272,19 +271,26 @@ class Master(Agent):
         done5, pending5 = await asyncio.wait(
             tasks, return_when=asyncio.ALL_COMPLETED
         )
-        log.p_header(f"Validation data sended to all agents.\n{done5}\n{pending5}\n")
+        log.p_header(f"Validation data sended to all agents.")
         return
-
-    async def slave_metrics_read(self):
-        log.p_warn("Starting slave metrics read")
-        info = await self.r.execute_command("XINFO", "GROUPS", self.stream_name)
-        data = self.decode_list_of_bytes(info)
-        group_names = [group['name'] for group in data]
-        log.p_warn(f"Group names: {group_names}")
+    
+    async def read_from_slaves(self):
+        import aiofiles
+        """
+        Read from slaves
+        """
         while True:
-            for group in group_names:
-                response =  await self.r.xreadgroup(
-                    str(group), self.id, {self.stream_name: ">"}, block=0
+            await asyncio.sleep(1)
+            file_name = f'models/{self.id}_gathered_metrics.json'
+            async with aiofiles.open(file_name, mode="r") as f:
+                data = await f.read()
+                # if data includes all slaves
+                if self.slave_count <= len(data):
+                    log.p_ok(f"{log.p_bold(self.id)} All slaves read")
+                    break
+            try:
+                response = await self.r.xreadgroup(
+                    self.group_name, self.stream_name, {self.stream_name: ">"}, None
                 )
                 if response:
                     for stream_name, stream_data in response:
@@ -293,42 +299,64 @@ class Master(Agent):
                                 key.decode(): value.decode()
                                 for key, value in message_data.items()
                             }
-                            last_col  = decoded_dict["999"] 
-                            flag_val = int(float(last_col))
-                            if flag_val == -5:
-                                print("flag val: ", flag_val)
+                            # TODO: only get current master bound slave metrics
+                            if "id" in decoded_dict:
+                                async with aiofiles.open(file_name, mode="a+") as f:
+                                    await f.write(json.dumps(decoded_dict) + ",\n")
+                                # ack
+                                await self.r.xack(self.stream_name, self.group_name, message_id)
 
 
-    @async_timeit
+                            
+            except Exception as e:
+                log.p_fail(f"Read slaves fail: {log.p_bold(self.id)} {e}")
+                log.p_fail(e.__traceback__.tb_lineno)
+
+        """ 
+        log.p_header(f"Reading from slaves")
+        tasks = []
+        for i in range(self.slave_count):
+            task = asyncio.create_task(self.read())
+            tasks.append(task)
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
+        log.p_header(f"Read from all slaves.\n{done}\n{pending}\n")
+        return """
+
     async def master_main(self):
         await self.connect_to_redis()
         await self.create_consumer_group()
-        await self.slave_counter()
         log.p_ok(f"{log.p_bold(self.id)} Slave count: {self.slave_count}")
 
-        splits = None
         if not os.path.exists('output'):
+            # create output dir
             os.makedirs("output")
 
             splits = self.split(
                 self.read_csv(self.dataset_path),
                 number_of_slaves=self.slave_count,
-                Y_column_name="LV ActivePower (kW)",
-                test_ratio=0.2,
-                common_ratio=0.5,
-                random_state=42,
-                shuffle=True,
+                Y_column_name=self.Y_column_name,
             )
 
             try:
-                tasks=[]
-                task = asyncio.create_task(self.send_all(splits))
-                tasks.append(task)
-                done, pending = await asyncio.wait(
-                    tasks, return_when=asyncio.ALL_COMPLETED
-                )
-                if task.done():
-                    task.cancel()
-                    
+                await self.send_all(splits)
+            except:
+                log.p_fail(f"{log.p_bold(self.id)} {e}")
+            finally:
+                log.p_okblue("Master reading from slaves for metrics")
+                await self.read_from_slaves()
+
+
+            try:
+                await self.r.execute_command("XGROUP", "DESTROY", self.stream_name, self.group_name)
             except Exception as e:
                 log.p_fail(f"{log.p_bold(self.id)} {e}")
+
+            if self.unique_data_sent:
+                log.p_ok(f"{log.p_bold(self.id)} Unique data sent")
+
+            if self.common_train_data_sent:
+                log.p_ok(f"{log.p_bold(self.id)} Common data sent")
+        else:
+            log.p_ok(f"{log.p_bold(self.id)} Output directory exists.\nGoing straigth to training and predicting.")
+            print("reading from slaves")
+            await self.read_from_slaves()

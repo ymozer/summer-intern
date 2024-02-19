@@ -4,14 +4,9 @@ import asyncio
 import subprocess
 import threading
 import docker
+import configparser
 import redis.asyncio as redis
 
-# Redis exceptions
-from redis.exceptions import ConnectionError, TimeoutError
-import uvloop
-import argparse
-
-from Agent import Agent
 from Master import Master
 from Slave import Slave
 from log.color import LogColor
@@ -20,15 +15,64 @@ from utils.timeit import timeit
 
 from lightgbm import LGBMRegressor
 from xgboost  import XGBRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.tree import DecisionTreeRegressor
+
+from sklearn.linear_model import (
+    LinearRegression,
+    Ridge,
+    Lasso,
+    ElasticNet,
+    Lars,
+    LassoLars,
+    OrthogonalMatchingPursuit,
+    BayesianRidge,
+    ARDRegression,
+    SGDRegressor,
+    PassiveAggressiveRegressor,
+    RANSACRegressor,
+    TheilSenRegressor,
+    HuberRegressor,
+    PoissonRegressor,
+    TweedieRegressor,
+    GammaRegressor,
+    )
+from sklearn.tree import (
+    DecisionTreeRegressor,
+    ExtraTreeRegressor
+    )
 from sklearn.ensemble import (
     ExtraTreesRegressor,
     AdaBoostRegressor,
     RandomForestRegressor,
-)
+    GradientBoostingRegressor,
+    BaggingRegressor,
+    StackingRegressor,
+    VotingRegressor,
+    IsolationForest,
+    HistGradientBoostingRegressor,
+    )
+
+from sklearn.neighbors import (
+    KNeighborsRegressor,
+    RadiusNeighborsRegressor,
+    NearestCentroid,
+    KernelDensity,
+    LocalOutlierFactor,
+    )
+
+from sklearn.svm import (
+    SVR,
+    NuSVR,
+    LinearSVR,
+    OneClassSVM,
+    )
+
+from sklearn.neural_network import (
+    MLPRegressor,
+    BernoulliRBM,
+    )
 
 log=LogColor()
+LGBMRegressor()
 
 def check_container_exists(container_name):
     client = docker.from_env()
@@ -40,59 +84,206 @@ def check_container_exists(container_name):
     
 
 if __name__ == "__main__":
-    slave_list = ["agent1", "agent2", "agent3", "agent4"]
-    model_names=[LinearRegression(), RandomForestRegressor(), DecisionTreeRegressor(), AdaBoostRegressor(), LGBMRegressor()]
-    parser = argparse.ArgumentParser(description="Agent")
-    parser.add_argument("--id", type=str, default="agent_1", help="Agent ID")
-    parser.add_argument("--ip", type=str, default="127.0.0.1", help="Redis IP")
-    parser.add_argument("--port", type=int, default=6379, help="Redis port")
-    parser.add_argument(
-        "--slave",
-        type=str,
-        nargs="+",
-        default=slave_list,
-        help="Slave names separated by space",
-    )
+    # delete models directory and its contents asynchronously
+    if os.path.exists("models"):
+        for file in os.listdir("models"):
+            os.remove(f"models/{file}")
+        os.rmdir("models")
+        
+    ''' delete output directory and its contents
+    if os.path.exists("output"):
+        for file in os.listdir("output"):
+            os.remove(f"output/{file}")
+        os.rmdir("output")
     '''
-    container_name = "intern-cache-1"
-    if check_container_exists(container_name):
-        # docker stop intern-cache-1 with docker sdk
-        client = docker.from_env()
-        container = client.containers.get(container_name)
-        container.stop()
-        container.remove()
-        # docker volume rm intern_cache
-        client.volumes.get("intern_cache").remove()
-    '''
-    # docker-compose -f docker-compose.yml up
-    # Create a thread to run the Docker Compose command
+    
+    if not os.path.exists("models"):
+        os.mkdir("models")
 
+    async def run_different_ratios(ip,
+                                   port,
+                                   slave_name_list,
+                                   slave_model_list,
+                                   dataset_path,
+                                   y_column_name,
+                                   test_ratio=0.2,
+                                   validation_ratio=0.1
+                                   ):
+        '''
+        Run master and slave instances for each common-unique ratio in (10,100,10)
+        ''' 
+        for i in range(10,100,10):
+            slave_instances = []
+            counter = 0
+            common_ratio = i/100
+            unique_ratio = round(1-common_ratio,1)
+            # fix floating point precision
 
-    async def main():
-        args = parser.parse_args()
+            master_id=f"m_{common_ratio}_{unique_ratio}"
+            master = Master(
+                master_id,
+                ip,
+                port,
+                "stream_1",
+                "group_1",
+                dataset_path=dataset_path,
+                common_ratio=common_ratio,
+                test_ratio=test_ratio,
+                validation_ratio=validation_ratio,
+                y_column_name=y_column_name,
+                slave_count=len(slave_name_list)
+            )
+
+            for slave_ins in slave_name_list:
+                ins = Slave(
+                    f"{slave_ins}_{master_id}",
+                    ip,
+                    port,
+                    "stream_1",
+                    f"group_{counter+2}",
+                    slave_model_list[counter],
+                    {},
+                    3
+                )
+                slave_instances.append(ins.slave_main())
+                counter += 1
+                
+            open(f"models/{master_id}_gathered_metrics.json", "w").close()
+            try:
+                await asyncio.gather(master.master_main(), *slave_instances)
+            except Exception as e:
+                log.p_fail(f"Exception: {e}")
+                log.p_fail(e.__traceback__.tb_lineno)
+    
+    async def run_once(dataset_path,
+                       common_ratio,
+                       test_ratio,
+                       validation_ratio,
+                       y_column_name,
+                       ip,
+                       port,
+                       stream_name,
+                       master_group_name,
+                       slave_name_list:list,
+                       slave_model_list:list,
+                       delay=0 
+                       ):
+        '''
+        Run master and slave instances for a single common-unique ratio
+        '''
         slave_instances = []
-        counter = 0
-        for slave_ins in args.slave:
-            ins = Slave(slave_ins, args.ip, args.port, "stream_1", f"group_{counter+2}", model_names[counter],{})
-            slave_instances.append(ins.slave_main())
-            counter += 1
-            print(slave_ins)
+        unique_ratio = round(1-common_ratio,1)
+        # fix floating point precision
+        master_id=f"m_{common_ratio}_{unique_ratio}"
+        open(f"models/{master_id}_gathered_metrics.json", "w").close()
 
         master = Master(
-            "master",
-            args.ip,
-            args.port,
-            "stream_1",
-            "group_1",
-            dataset_path="T1.csv",
+            master_id,
+            ip,
+            port,
+            stream_name,
+            master_group_name,
+            dataset_path=dataset_path,
             delay=0,
+            common_ratio=common_ratio,
+            test_ratio=test_ratio,
+            validation_ratio=validation_ratio,
+            y_column_name=y_column_name,
+            slave_count=len(slave_name_list)
         )
 
-        await asyncio.gather(master.master_main(), *slave_instances)
+        counter = 0
+        for slave_ins in slave_name_list:
+            ins = Slave(
+                slave_ins,
+                ip,
+                port,
+                stream_name,
+                f"group_{counter+2}",
+                slave_model_list[counter],
+                {},
+                delay
+            )
 
-    with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
+            slave_instances.append(ins.slave_main())
+            counter += 1
+            
         try:
-            runner.run(main())
-        finally:
-            log.p_warn("QUITTING")
-            sys.exit(1)
+            await asyncio.gather(master.master_main(), *slave_instances)
+        except Exception as e:
+            log.p_fail(f"Run Once Exception: {e}")
+            log.p_fail(e.__traceback__.tb_lineno)
+
+
+    async def main():        
+        config = configparser.ConfigParser()
+        config.read("config.ini", encoding="utf-8")
+        sections = config.sections()
+        slave_name_list = []
+        slave_model_list = []
+        
+        for section in sections:
+            if section.startswith("slave"):
+                slave_name_list.append(config.get(section, "name"))
+                slave_model_list.append(eval(eval(config.get(section, "model"))))
+        print(slave_name_list)
+        print(slave_model_list)
+
+        if config.getboolean("general", "run_different_ratios"):
+            try:
+                await run_different_ratios(
+                    str(config.get("center", "ip")).strip('"'),
+                    config.getint("center", "port"),
+                    slave_name_list,
+                    slave_model_list,
+                    config.get     ("center", "dataset_path"),
+                    config.get     ("center", "y_column_name"),
+                    config.getfloat("center", "test_ratio"),
+                    config.getfloat("center", "val_ratio")
+                )
+            except Exception as e:
+                log.p_fail(f"Ratios Exception: {e}")
+                log.p_fail(e.__traceback__.tb_lineno)
+                sys.exit(1)
+        else:
+            try:
+                await run_once(
+                    config.get     ("center", "dataset_path"),
+                    config.getfloat("center", "common_ratio"),
+                    config.getfloat("center", "test_ratio"),
+                    config.getfloat("center", "val_ratio"),
+                    config.get     ("center", "y_column_name"),
+                    str(config.get("center", "ip")).strip('"'),
+                    config.getint  ("center", "port"),
+                    config.get     ("center", "stream"),
+                    config.get     ("center", "group"),
+                    slave_name_list,
+                    slave_model_list,
+                    config.getint  ("general", "delay_read")
+                )
+            except Exception as e:
+                log.p_fail(f"Run Once Exception: {e}")
+                log.p_fail(e.__traceback__.tb_lineno)
+                sys.exit(1)
+
+    # if system is macos, use uvloop
+    if sys.platform == "darwin":
+        import uvloop
+        with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
+            try:
+                runner.run(main())
+            finally:
+                log.p_warn("QUITTING")
+                sys.exit(1)
+
+    elif sys.platform == "win32":
+        with asyncio.Runner() as runner:
+            print('platform is Windows')
+            try:
+                runner.run(main())
+            finally:
+                log.p_warn("QUITTING")
+                sys.exit(1)
+    else :
+        log.p_fail("Unsupported OS")
+
